@@ -34,11 +34,12 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.xxcactussell.mategram.domain.entity.AuthState
 import com.xxcactussell.mategram.notifications.MessageService
+import com.xxcactussell.mategram.ui.ChatListView
 import com.xxcactussell.mategram.ui.Login2FAView
 import com.xxcactussell.mategram.ui.LoginCodeView
 import com.xxcactussell.mategram.ui.LoginPhoneView
 import com.xxcactussell.mategram.ui.LoginView
-import com.xxcactussell.mategram.ui.navcontroller.AppNavHost
+import com.xxcactussell.mategram.ui.chat.ChatView
 import com.xxcactussell.mategram.ui.theme.MategramTheme
 
 class MainActivity : ComponentActivity() {
@@ -77,9 +78,6 @@ class MainActivity : ComponentActivity() {
                 var isOvercome by rememberSaveable { mutableStateOf(false) }
 
                 when (authState) {
-                    AuthState.Ready -> {
-                        AppNavHost()
-                    }
                     AuthState.WaitCode -> {
                         LoginCodeView()
                     }
@@ -119,6 +117,10 @@ class MainActivity : ComponentActivity() {
                                 trackColor = MaterialTheme.colorScheme.surfaceVariant,
                             )
                         }
+                    }
+
+                    AuthState.Ready -> {
+                        ChatListView()
                     }
                 }
             }

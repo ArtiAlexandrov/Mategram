@@ -26,12 +26,17 @@ import com.xxcactussell.mategram.TelegramRepository.api
 import com.xxcactussell.mategram.TelegramRepository.loadChatDetails
 import com.xxcactussell.mategram.TelegramRepository.loadChatFolder
 import com.xxcactussell.mategram.TelegramRepository.loadChatIds
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.addFileToDownloads
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMe
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.sendMessage
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.setTdlibParameters
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.viewMessages
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import java.io.FileInputStream
 
@@ -46,8 +51,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             TelegramRepository.authStateFlow.collect { newState ->
                 println("AuthViewModel: получено состояние: $newState")
-                // Здесь обновляем UI через состояние авторизации,
-                // например, можем сохранить состояние в LiveData или StateFlow, используемый в UI.
             }
         }
     }
@@ -101,6 +104,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _visibleChats = MutableStateFlow<List<TdApi.Chat>>(emptyList())
     val visibleChats: StateFlow<List<TdApi.Chat>> = _visibleChats
 
+    private var _me = MutableStateFlow<TdApi.User?>(null)
+    val me : StateFlow<TdApi.User?> = _me
+
     init {
         observeAuthorizationState()
     }
@@ -112,6 +118,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     loadFolders()
                     observeChatUpdates()
                     observeNewMessagesFromChat()
+                    _me.value = api.getMe()
                 }
             }
         }
@@ -224,32 +231,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private val _avatarPaths = MutableStateFlow<Map<Long, String?>>(emptyMap())
-    val avatarPaths: StateFlow<Map<Long, String?>> = _avatarPaths
 
     private val fileIdToChatId = mutableMapOf<Int, Long>()
 
-    init {
-        observeFileUpdates()
-    }
-
-    private fun observeFileUpdates() {
-        viewModelScope.launch (Dispatchers.IO) {
-            TelegramRepository.downloadedFileFlow.collect { file ->
-                if (file.local.isDownloadingCompleted) {
-                    val chatId = findChatIdByFileId(file.id)
-                    if (chatId != null) {
-                        _avatarPaths.value = _avatarPaths.value.toMutableMap().apply {
-                            this[chatId] = file.local.path
-                        }
-                    }
-                    println("Файл загружен: ${file.local.path}")
-                }
-            }
+    suspend fun getChatAvatarPath(chat: TdApi.Chat, size: String = "s"): String? {
+        var avatarFileId: Int? = null
+        if (size == "s") {
+            avatarFileId = chat.photo?.small?.id
+        } else {
+            avatarFileId = chat.photo?.big?.id
         }
-    }
-
-    suspend fun getChatAvatarPath(chat: TdApi.Chat): String? {
-        val avatarFileId = chat.photo?.small?.id
         val chatId = chat.id
         if (avatarFileId != null) {
             val file = TelegramRepository.getFile(avatarFileId)
@@ -262,6 +253,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         return null
     }
+
     suspend fun getDocumentThumbnail(documentThumbnail: TdApi.Thumbnail): String? {
         var file = TelegramRepository.getFile(documentThumbnail.file.id)
         if (!file.local.isDownloadingCompleted) {

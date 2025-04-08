@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -25,9 +23,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.xxcactussell.mategram.MainViewModel
+import com.xxcactussell.mategram.R
 
 @Composable
 fun Login2FAView() {
@@ -63,7 +63,7 @@ fun Login2FAView() {
                         },
                     ) {
                         Icon(
-                            Icons.Filled.ArrowForward,
+                            painterResource(R.drawable.baseline_arrow_forward_24),
                             contentDescription = "Extended floating action button."
                         )
                     }

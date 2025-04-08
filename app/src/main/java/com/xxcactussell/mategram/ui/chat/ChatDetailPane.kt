@@ -1,7 +1,6 @@
 package com.xxcactussell.mategram.ui.chat
 
 import android.widget.Toast
-import android.widget.VideoView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -17,7 +16,6 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -38,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -60,39 +59,33 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
-import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.xxcactussell.mategram.MainViewModel
 import com.xxcactussell.mategram.R
-import com.xxcactussell.mategram.TelegramRepository
 import com.xxcactussell.mategram.TelegramRepository.api
 import com.xxcactussell.mategram.convertUnixTimestampToDate
 import com.xxcactussell.mategram.formatFileSize
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
-import org.drinkless.tdlib.TdApi.Document
-import org.drinkless.tdlib.TdApi.File
 import org.drinkless.tdlib.TdApi.MessagePhoto
 import org.drinkless.tdlib.TdApi.MessageReplyToMessage
 import org.drinkless.tdlib.TdApi.MessageText
 import org.drinkless.tdlib.TdApi.MessageVideo
 import org.drinkless.tdlib.TdApi.Video
 
-@androidx.annotation.OptIn(UnstableApi::class)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatView(
+fun ChatDetailPane(
     chatId: Long,
+    onBackClick: () -> Unit,
     viewModel: MainViewModel = viewModel(),
-    navController: NavController
+    onShowInfo: () -> Unit
 ) {
     // Загружаем объект чата асинхронно при изменении chatId.
     var chat: TdApi.Chat? by remember { mutableStateOf(null) }
@@ -152,15 +145,24 @@ fun ChatView(
                 visibleUnreadMessages.forEach { message ->
                     viewModel.markAsRead(message)
                 }
+                viewModel.updateChatsFromNetworkForView()
             }
     }
 
-
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
+                ),
                 title = {
-                    Row {
+                    Row(
+                        modifier = Modifier.clickable {
+                            onShowInfo()
+                        }
+                    )  {
                         if (avatarPath != null) {
                             AsyncImage(
                                 model = avatarPath,
@@ -185,16 +187,8 @@ fun ChatView(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = {
-                        navController.navigateUp()
-                        viewModel.setHandlerForChat(null)
-                    })
-
-                    {
-                        Icon(
-                            painter = painterResource(R.drawable.baseline_arrow_back_24),
-                            contentDescription = "Назад"
-                        )
+                    IconButton(onClick = onBackClick) {
+                        Icon(painterResource(R.drawable.baseline_arrow_back_24), contentDescription = null)
                     }
                 }
             )
@@ -257,8 +251,7 @@ fun ChatView(
                     Icon(painterResource(R.drawable.baseline_send_24), contentDescription = "Extended floating action button.")
                 }
             }
-        },
-        modifier = Modifier.windowInsetsPadding(WindowInsets.ime)
+        }
     ) { innerPadding ->
         // Основной контент экрана чата.
         LazyColumn (
@@ -327,212 +320,212 @@ fun ChatView(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis)
                                     Row {
-                                    if (messageToReply != null) {
-                                        if (messageToReply!!.content is MessagePhoto) {
-                                            Icon(
-                                                painterResource(R.drawable.baseline_image_24),
-                                                "photo",
-                                                Modifier
-                                                    .size(16.dp)
-                                                    .align(Alignment.CenterVertically)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
+                                        if (messageToReply != null) {
+                                            if (messageToReply!!.content is MessagePhoto) {
+                                                Icon(
+                                                    painterResource(R.drawable.baseline_image_24),
+                                                    "photo",
+                                                    Modifier
+                                                        .size(16.dp)
+                                                        .align(Alignment.CenterVertically)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = (messageToReply!!.content as MessagePhoto).caption.text
+                                                        ?: "Нет сообщения",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            } else if (messageToReply!!.content is MessageVideo) {
+                                                Icon(
+                                                    painterResource(R.drawable.baseline_video_file_24),
+                                                    "photo",
+                                                    Modifier
+                                                        .size(16.dp)
+                                                        .align(Alignment.CenterVertically)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = (messageToReply!!.content as MessageVideo).caption.text
+                                                        ?: "Нет сообщения",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            } else if (messageToReply!!.content is MessageText) {
+                                                Text(
+                                                    text = (messageToReply!!.content as MessageText).text.text
+                                                        ?: "Нет сообщений",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            } else if (messageToReply!!.content is TdApi.MessageAudio) {
+                                                Icon(
+                                                    painterResource(R.drawable.baseline_audio_file_24),
+                                                    "photo",
+                                                    Modifier
+                                                        .size(16.dp)
+                                                        .align(Alignment.CenterVertically)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = (messageToReply!!.content as TdApi.MessageAudio).caption.text
+                                                        ?: "Нет сообщений",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            } else if (messageToReply!!.content is TdApi.MessageContact) {
+                                                Icon(
+                                                    painterResource(R.drawable.baseline_perm_contact_calendar_24),
+                                                    "photo",
+                                                    Modifier
+                                                        .size(16.dp)
+                                                        .align(Alignment.CenterVertically)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = (messageToReply!!.content as TdApi.MessageContact).contact.toString()
+                                                        ?: "Нет сообщений",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            } else if (messageToReply!!.content is TdApi.MessageDocument) {
+                                                Icon(
+                                                    painterResource(R.drawable.baseline_edit_document_24),
+                                                    "photo",
+                                                    Modifier
+                                                        .size(16.dp)
+                                                        .align(Alignment.CenterVertically)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = (messageToReply!!.content as TdApi.MessageDocument).caption.text
+                                                        ?: "Нет сообщений",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            } else if (messageToReply!!.content is TdApi.MessageGame) {
+                                                Icon(
+                                                    painterResource(R.drawable.baseline_videogame_asset_24),
+                                                    "photo",
+                                                    Modifier
+                                                        .size(16.dp)
+                                                        .align(Alignment.CenterVertically)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = (messageToReply!!.content as TdApi.MessageGame).game.toString()
+                                                        ?: "Нет сообщений",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            } else if (messageToReply!!.content is TdApi.MessageGiveaway) {
+                                                Icon(
+                                                    painterResource(R.drawable.baseline_emoji_events_24),
+                                                    "photo",
+                                                    Modifier
+                                                        .size(16.dp)
+                                                        .align(Alignment.CenterVertically)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = (messageToReply!!.content as TdApi.MessageGiveaway).prize.toString()
+                                                        ?: "Нет сообщений",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            } else if (messageToReply!!.content is TdApi.MessagePoll) {
+                                                Icon(
+                                                    painterResource(R.drawable.baseline_poll_24),
+                                                    "photo",
+                                                    Modifier
+                                                        .size(16.dp)
+                                                        .align(Alignment.CenterVertically)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = (messageToReply!!.content as TdApi.MessagePoll).poll.question.text
+                                                        ?: "Нет сообщений",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            } else if (messageToReply!!.content is TdApi.MessageVideoNote) {
+                                                Icon(
+                                                    painterResource(R.drawable.baseline_slow_motion_video_24),
+                                                    "photo",
+                                                    Modifier
+                                                        .size(16.dp)
+                                                        .align(Alignment.CenterVertically)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = "Видеосообщение",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            } else if (messageToReply!!.content is TdApi.MessageVoiceNote) {
+                                                Icon(
+                                                    painterResource(R.drawable.baseline_record_voice_over_24),
+                                                    "photo",
+                                                    Modifier
+                                                        .size(16.dp)
+                                                        .align(Alignment.CenterVertically)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = "Аудиосообщение",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            } else if (messageToReply!!.content is TdApi.MessageSticker) {
+                                                Icon(
+                                                    painterResource(R.drawable.baseline_emoji_emotions_24),
+                                                    "photo",
+                                                    Modifier
+                                                        .size(16.dp)
+                                                        .align(Alignment.CenterVertically)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = (messageToReply!!.content as TdApi.MessageSticker).sticker.emoji
+                                                        ?: "Стикер",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            } else if (messageToReply!!.content is TdApi.MessageAnimation) {
+                                                Icon(
+                                                    painterResource(R.drawable.baseline_image_24),
+                                                    "photo",
+                                                    Modifier
+                                                        .size(16.dp)
+                                                        .align(Alignment.CenterVertically)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = (messageToReply!!.content as TdApi.MessageAnimation).caption.text
+                                                        ?: "Стикер",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        } else {
                                             Text(
-                                                text = (messageToReply!!.content as MessagePhoto).caption.text
-                                                    ?: "Нет сообщения",
+                                                text = "Сообщение недоступно",
                                                 style = MaterialTheme.typography.labelSmall,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
-                                            )
-                                        } else if (messageToReply!!.content is MessageVideo) {
-                                            Icon(
-                                                painterResource(R.drawable.baseline_video_file_24),
-                                                "photo",
-                                                Modifier
-                                                    .size(16.dp)
-                                                    .align(Alignment.CenterVertically)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = (messageToReply!!.content as MessageVideo).caption.text
-                                                    ?: "Нет сообщения",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        } else if (messageToReply!!.content is MessageText) {
-                                            Text(
-                                                text = (messageToReply!!.content as MessageText).text.text
-                                                    ?: "Нет сообщений",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        } else if (messageToReply!!.content is TdApi.MessageAudio) {
-                                            Icon(
-                                                painterResource(R.drawable.baseline_audio_file_24),
-                                                "photo",
-                                                Modifier
-                                                    .size(16.dp)
-                                                    .align(Alignment.CenterVertically)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = (messageToReply!!.content as TdApi.MessageAudio).caption.text
-                                                    ?: "Нет сообщений",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        } else if (messageToReply!!.content is TdApi.MessageContact) {
-                                            Icon(
-                                                painterResource(R.drawable.baseline_perm_contact_calendar_24),
-                                                "photo",
-                                                Modifier
-                                                    .size(16.dp)
-                                                    .align(Alignment.CenterVertically)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = (messageToReply!!.content as TdApi.MessageContact).contact.toString()
-                                                    ?: "Нет сообщений",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        } else if (messageToReply!!.content is TdApi.MessageDocument) {
-                                            Icon(
-                                                painterResource(R.drawable.baseline_edit_document_24),
-                                                "photo",
-                                                Modifier
-                                                    .size(16.dp)
-                                                    .align(Alignment.CenterVertically)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = (messageToReply!!.content as TdApi.MessageDocument).caption.text
-                                                    ?: "Нет сообщений",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        } else if (messageToReply!!.content is TdApi.MessageGame) {
-                                            Icon(
-                                                painterResource(R.drawable.baseline_videogame_asset_24),
-                                                "photo",
-                                                Modifier
-                                                    .size(16.dp)
-                                                    .align(Alignment.CenterVertically)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = (messageToReply!!.content as TdApi.MessageGame).game.toString()
-                                                    ?: "Нет сообщений",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        } else if (messageToReply!!.content is TdApi.MessageGiveaway) {
-                                            Icon(
-                                                painterResource(R.drawable.baseline_emoji_events_24),
-                                                "photo",
-                                                Modifier
-                                                    .size(16.dp)
-                                                    .align(Alignment.CenterVertically)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = (messageToReply!!.content as TdApi.MessageGiveaway).prize.toString()
-                                                    ?: "Нет сообщений",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        } else if (messageToReply!!.content is TdApi.MessagePoll) {
-                                            Icon(
-                                                painterResource(R.drawable.baseline_poll_24),
-                                                "photo",
-                                                Modifier
-                                                    .size(16.dp)
-                                                    .align(Alignment.CenterVertically)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = (messageToReply!!.content as TdApi.MessagePoll).poll.question.text
-                                                    ?: "Нет сообщений",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        } else if (messageToReply!!.content is TdApi.MessageVideoNote) {
-                                            Icon(
-                                                painterResource(R.drawable.baseline_slow_motion_video_24),
-                                                "photo",
-                                                Modifier
-                                                    .size(16.dp)
-                                                    .align(Alignment.CenterVertically)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "Видеосообщение",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        } else if (messageToReply!!.content is TdApi.MessageVoiceNote) {
-                                            Icon(
-                                                painterResource(R.drawable.baseline_record_voice_over_24),
-                                                "photo",
-                                                Modifier
-                                                    .size(16.dp)
-                                                    .align(Alignment.CenterVertically)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = "Аудиосообщение",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        } else if (messageToReply!!.content is TdApi.MessageSticker) {
-                                            Icon(
-                                                painterResource(R.drawable.baseline_emoji_emotions_24),
-                                                "photo",
-                                                Modifier
-                                                    .size(16.dp)
-                                                    .align(Alignment.CenterVertically)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = (messageToReply!!.content as TdApi.MessageSticker).sticker.emoji
-                                                    ?: "Стикер",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        } else if (messageToReply!!.content is TdApi.MessageAnimation) {
-                                            Icon(
-                                                painterResource(R.drawable.baseline_image_24),
-                                                "photo",
-                                                Modifier
-                                                    .size(16.dp)
-                                                    .align(Alignment.CenterVertically)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = (messageToReply!!.content as TdApi.MessageAnimation).caption.text
-                                                    ?: "Стикер",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                    } else {
-                                        Text(
-                                            text = "Сообщение недоступно",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
                                             )
                                         }
                                     }

@@ -2,11 +2,13 @@ package com.xxcactussell.mategram
 
 import android.annotation.SuppressLint
 import android.content.Context
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.xxcactussell.mategram.TelegramRepository.api
 import com.xxcactussell.mategram.domain.entity.AuthState
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramFlow
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.checkAuthenticationCode
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.checkAuthenticationPassword
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getAuthorizationState
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatFolder
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatHistory
@@ -35,7 +37,9 @@ import com.xxcactussell.mategram.kotlinx.telegram.flows.chatPositionFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatReadInboxFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.unreadChatCountFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.unreadMessageCountFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onEach
 import kotlinx.telegram.flows.fileFlow
 import org.drinkless.tdlib.TdApi
 import org.drinkless.tdlib.TdApi.Message
@@ -58,26 +62,39 @@ object TelegramRepository : UserKtx, ChatKtx {
     }
 
     val authStateFlow: Flow<AuthState> = api.authorizationStateFlow()
+        .onEach { state ->  // Используем onEach вместо map для side-effects
+            when (state) {
+                is TdApi.AuthorizationStateWaitTdlibParameters -> {
+                    println("MAPPER: Отправляем параметры TDLib...")
+                    try {
+                        api.setTdlibParameters(
+                            TelegramCredentials.useTestDc,
+                            TelegramCredentials.databaseDirectory,
+                            TelegramCredentials.filesDirectory,
+                            TelegramCredentials.encryptionKey,
+                            TelegramCredentials.useFileDatabase,
+                            TelegramCredentials.useChatInfoDatabase,
+                            TelegramCredentials.useMessageDatabase,
+                            TelegramCredentials.useSecretChats,
+                            TelegramCredentials.apiId,
+                            TelegramCredentials.apiHash,
+                            TelegramCredentials.systemLanguageCode,
+                            TelegramCredentials.deviceModel,
+                            TelegramCredentials.systemVersion,
+                            TelegramCredentials.applicationVersion
+                        )
+                        println("MAPPER: Параметры TDLib успешно отправлены")
+                    } catch (e: Exception) {
+                        println("MAPPER: Ошибка отправки параметров TDLib: ${e.message}")
+                    }
+                }
+            }
+        }
         .map { state ->
             when (state) {
                 is TdApi.AuthorizationStateWaitTdlibParameters -> {
                     println("MAPPER: Отправляем параметры TDLib...")
-                    api.setTdlibParameters(
-                        TelegramCredentials.useTestDc,
-                        TelegramCredentials.databaseDirectory,
-                        TelegramCredentials.filesDirectory,
-                        TelegramCredentials.encryptionKey,
-                        TelegramCredentials.useFileDatabase,
-                        TelegramCredentials.useChatInfoDatabase,
-                        TelegramCredentials.useMessageDatabase,
-                        TelegramCredentials.useSecretChats,
-                        TelegramCredentials.apiId,
-                        TelegramCredentials.apiHash,
-                        TelegramCredentials.systemLanguageCode,
-                        TelegramCredentials.deviceModel,
-                        TelegramCredentials.systemVersion,
-                        TelegramCredentials.applicationVersion
-                    )
+
                     AuthState.WaitTdlibParameters
                 }
 
@@ -107,8 +124,9 @@ object TelegramRepository : UserKtx, ChatKtx {
                 }
             }
         }
+        .distinctUntilChanged()
         .flowOn(Dispatchers.IO)
-        .shareIn(coroutineScope, SharingStarted.Eagerly, replay = 1)
+        .shareIn(coroutineScope, SharingStarted.WhileSubscribed(5000), replay = 1)
 
 
     // Запускаем подключение клиента TDLib.

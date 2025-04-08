@@ -2,7 +2,6 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    id("kotlin-kapt") // Добавляем плагин kapt
 }
 
 android {
@@ -56,6 +55,7 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    implementation(libs.material3)
     implementation(libs.androidx.room.common)
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.navigation.runtime.android)
@@ -63,6 +63,7 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.adaptive.navigation.android)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -76,5 +77,8 @@ dependencies {
     implementation(libs.accompanist.navigation.animation)
     implementation (libs.androidx.animation)
     implementation(libs.coil.gif)
-    kapt("androidx.room:room-compiler:2.6.1")
+    implementation(libs.androidx.adaptive)
+    implementation(libs.androidx.adaptive.layout)
+    implementation(libs.androidx.adaptive.navigation)
+    implementation("androidx.compose.material3:material3-window-size-class")
 }

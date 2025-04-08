@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -66,7 +64,7 @@ fun LoginPhoneView() {
                             viewModel.sendPhone(phoneNumber)
                         },
                     ) {
-                        Icon(Icons.Filled.ArrowForward, contentDescription = "Extended floating action button.")
+                        Icon(painterResource(R.drawable.baseline_arrow_forward_24), contentDescription = "Extended floating action button.")
                     }
                 }
                 Spacer(modifier = Modifier.height(24.dp))
