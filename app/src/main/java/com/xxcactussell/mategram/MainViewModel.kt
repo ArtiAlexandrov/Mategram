@@ -613,6 +613,7 @@ class NotificationViewModel(application: Application) : AndroidViewModel(applica
                             chatId = chat.id,
                             chatTitle = chat.title ?: "Неизвестный чат",
                             messages = messageCache[chat.id]?.reversed() ?: listOf(text),
+                            chatPhotoFile = chat.photo?.small, // Add chat photo
                             notificationId = update.notificationGroupId // Use chatId as notification ID
                         )
                     }

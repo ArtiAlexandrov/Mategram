@@ -47,7 +47,6 @@ import com.xxcactussell.mategram.ui.Login2FAView
 import com.xxcactussell.mategram.ui.LoginCodeView
 import com.xxcactussell.mategram.ui.LoginPhoneView
 import com.xxcactussell.mategram.ui.LoginView
-import com.xxcactussell.mategram.ui.NotificationManager.createNotificationChannels
 import com.xxcactussell.mategram.ui.chat.ChatView
 import com.xxcactussell.mategram.ui.theme.MategramTheme
 import kotlinx.coroutines.CoroutineScope
@@ -66,7 +65,6 @@ class MainActivity : ComponentActivity() {
         TelegramRepository.initialize(this)
         TelegramRepository.checkAuthState()
         FirebaseApp.initializeApp(this)
-        createNotificationChannels(this)
         fcmManager = FcmManager.getInstance(this)
         val requiredPermissions = mutableListOf<String>()
         if (ContextCompat.checkSelfPermission(

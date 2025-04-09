@@ -1,12 +1,19 @@
 package com.xxcactussell.mategram.ui
 
 import android.util.Log
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.google.gson.Gson
+import com.xxcactussell.mategram.MainViewModel
 import com.xxcactussell.mategram.NotificationViewModel
+import com.xxcactussell.mategram.TelegramCredentials
 import com.xxcactussell.mategram.TelegramRepository
 import com.xxcactussell.mategram.TelegramRepository.api
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getAuthorizationState
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.setTdlibParameters
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -43,11 +50,33 @@ class FcmService : FirebaseMessagingService() {
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                Log.d("FCM", "Processing message: ${message.data}")
                 val jsonString = Gson().toJson(message.data.toMap())
                 api.attachClient()
 
-                // Process push notification
-                TdApi.ProcessPushNotification(jsonString)
+
+                when (val state = api.getAuthorizationState()) {
+                    is TdApi.AuthorizationStateWaitTdlibParameters -> {
+                        Log.d("FCM", "Initializing TDLib parameters")
+                        api.setTdlibParameters(
+                            TelegramCredentials.useTestDc,
+                            TelegramCredentials.databaseDirectory,
+                            TelegramCredentials.filesDirectory,
+                            TelegramCredentials.encryptionKey,
+                            TelegramCredentials.useFileDatabase,
+                            TelegramCredentials.useChatInfoDatabase,
+                            TelegramCredentials.useMessageDatabase,
+                            TelegramCredentials.useSecretChats,
+                            TelegramCredentials.apiId,
+                            TelegramCredentials.apiHash,
+                            TelegramCredentials.systemLanguageCode,
+                            TelegramCredentials.deviceModel,
+                            TelegramCredentials.systemVersion,
+                            TelegramCredentials.applicationVersion
+                        )
+                    }
+                }
+
 
                 // Start observer only if not already started
                 if (observerLock.compareAndSet(false, true)) {
@@ -58,6 +87,10 @@ class FcmService : FirebaseMessagingService() {
                         }
                     }
                 }
+
+                // Process push notification
+                TdApi.ProcessPushNotification(jsonString)
+
             } catch (e: Exception) {
                 Log.e("FCM_NOTIFY", "Error processing notification", e)
                 observerLock.set(false)
