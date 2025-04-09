@@ -1,11 +1,13 @@
 package com.xxcactussell.mategram.ui.chat
 
 import android.widget.Toast
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -20,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
@@ -40,6 +43,8 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
+import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -215,13 +220,14 @@ fun ChatDetailPane(
             )
         },
         bottomBar = {
-            Row(modifier = Modifier.padding(8.dp).navigationBarsPadding()) {
-                Card(modifier = Modifier.height(56.dp).fillMaxSize().weight(1f),
+            Row(modifier = Modifier.padding(8.dp).navigationBarsPadding(),
+                verticalAlignment = Alignment.Bottom) {
+                Card(modifier = Modifier.fillMaxWidth().weight(1f).wrapContentSize(),
                     shape = RoundedCornerShape(28.dp)
                 ) {
                     Row (modifier = Modifier
-                        .fillMaxSize(),
-                        verticalAlignment = Alignment.CenterVertically) {
+                        .fillMaxWidth(),
+                        verticalAlignment = Alignment.Bottom) {
                         IconButton(
                             modifier = Modifier.size(56.dp),
                             onClick = { }
@@ -232,7 +238,7 @@ fun ChatDetailPane(
                             )
                         }
                         Box(
-                            modifier = Modifier.fillMaxSize().weight(1f),
+                            modifier = Modifier.fillMaxWidth().weight(1f),
                         ) {
                             TextField(
                                 value = textNewMessage,
@@ -243,7 +249,8 @@ fun ChatDetailPane(
                                     focusedIndicatorColor = Color.Transparent,
                                     unfocusedIndicatorColor = Color.Transparent,
                                     disabledIndicatorColor = Color.Transparent
-                                )
+                                ),
+                                maxLines = 5
                             )
                         }
                         IconButton(
@@ -789,6 +796,7 @@ fun ChatDetailPane(
                                                             contentScale = ContentScale.Crop,
                                                             modifier = Modifier.fillMaxSize()
                                                                 .widthIn(max = 320.dp)
+                                                                .height(320.dp)
                                                         )
 
                                                         // Кнопка "Play" по центру
@@ -1039,33 +1047,46 @@ data class MediaAlbum(val messages: List<TdApi.Message>, val isOutgoing: Boolean
 }
 
 // Создадим Composable для отображения карусели
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MediaCarousel(
     album: MediaAlbum,
     viewModel: MainViewModel,
     modifier: Modifier = Modifier
 ) {
-    val pagerState = rememberPagerState(pageCount = { album.messages.size })
+    val carouselState = rememberCarouselState { album.messages.size }
 
     Column(modifier = modifier) {
-        HorizontalPager(
-            state = pagerState,
+        HorizontalMultiBrowseCarousel(
+            state = carouselState,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(320.dp)
-        ) { page ->
-            val message = album.messages[page]
+                .height(320.dp),
+            preferredItemWidth = 200.dp,
+            minSmallItemWidth = 20.dp,
+            itemSpacing = 8.dp,
+            contentPadding = PaddingValues(16.dp)
+        ) { index ->
+            val message = album.messages[index]
             when (message.content) {
                 is TdApi.MessagePhoto -> {
-                    PhotoContent(message = message, viewModel = viewModel)
+                    Box(
+                        modifier = Modifier.maskClip(MaterialTheme.shapes.medium)
+                    ) {
+                        PhotoContent(message = message, viewModel = viewModel)
+                    }
                 }
                 is TdApi.MessageVideo -> {
-                    VideoContent(message = message, viewModel = viewModel)
+                    Box(
+                        modifier = Modifier.maskClip(MaterialTheme.shapes.medium)
+                    ) {
+                        VideoContent(message = message, viewModel = viewModel)
+                    }
                 }
             }
         }
 
-        // Показываем caption только если он есть в первом сообщении
+        // Caption and page indicators
         val firstMessageCaption = album.messages.firstNotNullOfOrNull { message ->
             when (val content = message.content) {
                 is TdApi.MessagePhoto -> content.caption.text.takeIf { !it.isNullOrEmpty() }
@@ -1074,28 +1095,7 @@ fun MediaCarousel(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-        // Индикаторы страниц
-        Row(
-            Modifier
-                .fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center
-        ) {
-            repeat(pagerState.pageCount) { iteration ->
-                val color = if (pagerState.currentPage == iteration)
-                    MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
 
-                Box(
-                    modifier = Modifier
-                        .padding(horizontal = 2.dp)
-                        .clip(CircleShape)
-                        .background(color)
-                        .size(8.dp)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
 
         if (!firstMessageCaption.isNullOrEmpty()) {
             Text(
@@ -1105,7 +1105,6 @@ fun MediaCarousel(
             )
             Spacer(modifier = Modifier.height(16.dp))
         }
-
     }
 }
 
@@ -1126,9 +1125,8 @@ fun PhotoContent(
         model = imagePath,
         contentDescription = "Фото сообщения",
         contentScale = ContentScale.Crop,
-        modifier = modifier
-            .fillMaxSize()
-            .clip(RoundedCornerShape(24.dp))
+        modifier = Modifier
+            .height(320.dp)
     )
 }
 
@@ -1148,8 +1146,7 @@ fun VideoContent(
 
     Box(
         modifier = modifier
-            .fillMaxSize()
-            .clip(RoundedCornerShape(24.dp))
+            .height(320.dp)
     ) {
         AsyncImage(
             model = thumbnailPath,

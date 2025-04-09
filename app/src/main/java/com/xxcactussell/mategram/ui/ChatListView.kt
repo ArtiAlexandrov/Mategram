@@ -446,8 +446,8 @@ private fun ChatItem(
     }
 
     var avatarPath by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(chat) {
+    val avatarSize by remember { mutableStateOf<TdApi.File?>(chat.photo?.small) }
+    LaunchedEffect(avatarSize) {
         avatarPath = viewModel.getChatAvatarPath(chat)
     }
 
@@ -475,8 +475,13 @@ private fun ChatItem(
                 )
             } else {
                 // Показываем placeholder или индикатор загрузки
-                Box(modifier = Modifier.size(48.dp)) {
-                    CircularProgressIndicator(color = Color.Gray)
+                Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary)) {
+                    Text(
+                        text = chat.title?.firstOrNull()?.toString() ?: "Ч",
+                        modifier = Modifier.align(Alignment.Center),
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
                 }
             }
             Spacer(modifier = Modifier.width(16.dp))
