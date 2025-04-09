@@ -4,6 +4,9 @@ agp = "8.8.0"
 animation = "1.7.8"
 coilCompose = "2.6.0"
 coilGif = "2.2.2"
+firebaseBom = "33.12.0"
+googleServices = "4.4.2"
+googleServicesVersion = "4.4.0"
 gson = "2.12.1"
 kotlin = "2.0.0"
 coreKtx = "1.15.0"
@@ -36,6 +39,11 @@ androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-
 androidx-material3-window-size = { module = "androidx.compose.material3:material3-window-size", version.ref = "material3WindowSize" }
 coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coilCompose" }
 coil-gif = { module = "io.coil-kt:coil-gif", version.ref = "coilGif" }
+firebase-analytics = { module = "com.google.firebase:firebase-analytics" }
+firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebaseBom" }
+firebase-messaging = { module = "com.google.firebase:firebase-messaging" }
+google-services = { module = "com.google.gms:google-services", version.ref = "googleServices" }
+google-services-v440 = { module = "com.google.gms:google-services", version.ref = "googleServicesVersion" }
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }

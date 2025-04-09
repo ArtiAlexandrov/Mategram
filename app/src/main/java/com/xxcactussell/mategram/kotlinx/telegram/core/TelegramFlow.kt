@@ -1,5 +1,8 @@
 package com.xxcactussell.mategram.kotlinx.telegram.core
 
+import android.util.Log
+import com.google.firebase.iid.FirebaseInstanceIdReceiver
+import com.google.firebase.iid.internal.FirebaseInstanceIdInternal
 import com.xxcactussell.mategram.TelegramRepository.api
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -72,6 +75,46 @@ class TelegramFlow @OptIn(ExperimentalCoroutinesApi::class) constructor(
         function: TdApi.Function<ExpectedResult>
     ) {
         sendFunctionAsync(function)
+    }
+
+    fun registerDeviceTokenByClient(token: String) {
+
+        client?.send(TdApi.SetOption(
+            "notification_group_size_max",
+            TdApi.OptionValueInteger(5)
+        )) { response ->
+            when (response) {
+                is TdApi.Ok -> Log.d("FCM", "Successfully set notification_group_size_max")
+                is TdApi.Error -> Log.e("FCM", "Failed to set notification_group_size_max: ${response.message}")
+            }
+        }
+
+        // Максимальное количество групп уведомлений
+        client?.send(TdApi.SetOption(
+            "notification_group_count_max",
+            TdApi.OptionValueInteger(5)
+        )) { response ->
+            when (response) {
+                is TdApi.Ok -> Log.d("FCM", "Successfully set notification_group_count_max")
+                is TdApi.Error -> Log.e("FCM", "Failed to set notification_group_count_max: ${response.message}")
+            }
+        }
+
+        try {
+            val deviceToken = TdApi.DeviceTokenFirebaseCloudMessaging(
+                token,
+                false
+            )
+
+            client?.send(TdApi.RegisterDevice(deviceToken, longArrayOf())) { response ->
+                when (response) {
+                    is TdApi.Ok -> Log.d("FCM", "Device token registered successfully")
+                    is TdApi.Error -> Log.e("FCM", "Failed to register device: ${response.message}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("FCM", "Error registering device token", e)
+        }
     }
 
     /** Закрытие TDLib-клиента. */

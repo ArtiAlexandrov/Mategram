@@ -3,6 +3,7 @@ package com.xxcactussell.mategram
 import android.annotation.SuppressLint
 import android.content.Context
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.firebase.messaging.FirebaseMessaging
 import com.xxcactussell.mategram.TelegramRepository.api
 import com.xxcactussell.mategram.domain.entity.AuthState
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramFlow
@@ -14,10 +15,12 @@ import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatFolder
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatHistory
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChats
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getFile
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMe
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessages
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getRecommendedChats
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.logOut
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.registerDevice
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.setAuthenticationPhoneNumber
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.setTdlibParameters
 import com.xxcactussell.mategram.kotlinx.telegram.flows.authorizationStateFlow
@@ -35,11 +38,14 @@ import com.xxcactussell.mategram.kotlinx.telegram.extensions.UserKtx
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatFoldersFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatPositionFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatReadInboxFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.notificationGroupFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.unreadChatCountFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.unreadMessageCountFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import kotlinx.telegram.flows.fileFlow
 import org.drinkless.tdlib.TdApi
 import org.drinkless.tdlib.TdApi.Message
@@ -193,6 +199,8 @@ object TelegramRepository : UserKtx, ChatKtx {
     }
 
     val getNewMessageFlow: Flow<TdApi.Message> = api.newMessageFlow()
+
+    val updateNotificationGroupFlow: Flow<TdApi.UpdateNotificationGroup> = api.notificationGroupFlow()
 }
 
 suspend fun isUserContact(userId: Long): Boolean {

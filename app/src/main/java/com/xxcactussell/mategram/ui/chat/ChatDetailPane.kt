@@ -576,6 +576,7 @@ fun ChatDetailPane(
                                 Card(
                                     modifier = Modifier
                                         .widthIn(max = 320.dp)
+                                        .clip(RoundedCornerShape(24.dp))
                                         .clickable {
                                             isDateShown = !isDateShown
                                             date = convertUnixTimestampToDate(
@@ -884,6 +885,7 @@ fun ChatDetailPane(
 
                                 Card(
                                     modifier = Modifier.widthIn(max = 320.dp)
+                                        .clip(RoundedCornerShape(24.dp))
                                         .clickable {
                                             isDateShown = !isDateShown
                                             date = convertUnixTimestampToDate(
@@ -920,7 +922,7 @@ fun ChatDetailPane(
                                                 AsyncImage(
                                                     model = stickerPath,
                                                     contentDescription = "Стикер",
-                                                    contentScale = ContentScale.Crop,
+                                                    contentScale = ContentScale.Fit,
                                                     modifier = Modifier
                                                         .size(200.dp)
                                                         .clip(RoundedCornerShape(24.dp))

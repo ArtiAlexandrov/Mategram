@@ -1,5 +1,6 @@
 package com.xxcactussell.mategram
 
+import android.app.Application
 import android.content.Context
 import android.content.res.Resources
 import android.os.Build
@@ -8,7 +9,7 @@ import com.xxcactussell.mategram.TelegramRepository.appContext
 import java.io.File
 import java.security.SecureRandom
 
-class TelegramCredentials(context: Context) {
+class TelegramCredentials {
     companion object {
         private fun saveEncryptionKey(context: Context, key: ByteArray) {
             val prefs = context.getSharedPreferences("tdlib_prefs", Context.MODE_PRIVATE)
@@ -48,6 +49,6 @@ class TelegramCredentials(context: Context) {
         val systemLanguageCode = Resources.getSystem().configuration.locales[0].toString()
         val deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}"
         val systemVersion: String = Build.VERSION.RELEASE
-        const val applicationVersion = "1.0"
+        const val applicationVersion = "0.0.5beta"
     }
 }

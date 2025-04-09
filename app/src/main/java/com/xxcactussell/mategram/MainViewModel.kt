@@ -11,10 +11,13 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.application
 import androidx.lifecycle.viewModelScope
+import com.google.firebase.messaging.FirebaseMessaging
 import com.xxcactussell.mategram.domain.entity.AuthState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -26,27 +29,36 @@ import com.xxcactussell.mategram.TelegramRepository.api
 import com.xxcactussell.mategram.TelegramRepository.loadChatDetails
 import com.xxcactussell.mategram.TelegramRepository.loadChatFolder
 import com.xxcactussell.mategram.TelegramRepository.loadChatIds
+import com.xxcactussell.mategram.TelegramRepository.updateNotificationGroupFlow
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.addFileToDownloads
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMe
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.registerDevice
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.sendMessage
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.setOption
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.setTdlibParameters
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.viewMessages
+import com.xxcactussell.mategram.kotlinx.telegram.flows.activeNotificationsFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.notificationFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.notificationGroupFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.serviceNotificationFlow
+import com.xxcactussell.mategram.ui.FcmManager
+import com.xxcactussell.mategram.ui.FcmService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.FileInputStream
 
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-
-
     private val repository = TelegramRepository
-
+    private val NotificationHelper = com.xxcactussell.mategram.ui.NotificationManager
     init {
         viewModelScope.launch {
             TelegramRepository.authStateFlow.collect { newState ->
@@ -115,12 +127,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             authState.collect { state ->
                 if (state is AuthState.Ready) {
+                    val context = getApplication<Application>().applicationContext
+                    FcmManager(context).getFcmToken()
+                        ?.let { FcmManager(context).registerDeviceToken(it) }
                     loadFolders()
                     observeChatUpdates()
                     observeNewMessagesFromChat()
                     _me.value = api.getMe()
+                    setNotificationOptions()
+                    observeNotifications()
                 }
             }
+        }
+    }
+
+    private fun setNotificationOptions() {
+        viewModelScope.launch {
+            // Установка максимального количества групп уведомлений
+            api.setOption(
+                name = "notification_group_count_max",
+                value = TdApi.OptionValueInteger(10)
+            )
+
+            // Установка максимального размера группы уведомлений
+            api.setOption(
+                name = "notification_group_size_max",
+                value = TdApi.OptionValueInteger(20)
+            )
         }
     }
 
@@ -466,6 +499,88 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun getMessageById(replyMessage: TdApi.MessageReplyToMessage): TdApi.Message? {
         return api.getMessage(replyMessage.chatId, replyMessage.messageId)
+    }
+
+    fun observeNotifications() {
+        viewModelScope.launch {
+            // Set up notification group observer first
+            launch {
+                api.notificationGroupFlow().collect { update ->
+                    Log.d("NotificationDebug", "Group Update: $update")
+                    when (update.type) {
+                        is TdApi.NotificationGroupTypeMessages -> {
+                            Log.d("NotificationDebug", "Message group: ${update.notificationGroupId}")
+                            Log.d("NotificationDebug", "Added notifications: ${update.addedNotifications?.size}")
+                            Log.d("NotificationDebug", "Removed notification ids: ${update.removedNotificationIds?.size}")
+                        }
+                        is TdApi.NotificationGroupTypeMentions -> {
+                            Log.d("NotificationDebug", "Mentions group: ${update.notificationGroupId}")
+                        }
+                        is TdApi.NotificationGroupTypeCalls -> {
+                            Log.d("NotificationDebug", "Calls group: ${update.notificationGroupId}")
+                        }
+                    }
+                    handleNotificationGroup(update)
+                }
+            }
+
+            // Then observe individual notifications
+            launch {
+                api.notificationFlow().collect { update ->
+                    Log.d("NotificationDebug", "Single notification: ${update.notification.id}")
+                    handleNotification(update)
+                }
+            }
+
+            // Finally check active notifications
+            launch {
+                api.activeNotificationsFlow().collect { groups ->
+                    Log.d("NotificationDebug", "Active notifications groups: ${groups.size}")
+                    groups.forEach { group ->
+                        Log.d("NotificationDebug", "Group ${group.id} has ${group.notifications.size} notifications")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun handleNotification(update: TdApi.UpdateNotification) {
+        viewModelScope.launch {
+            Log.d("NotificationDebug", "Received notification: ${update.notification.type}")
+            when (val content = update.notification.type) {
+                is TdApi.NotificationTypeNewMessage -> {
+                    val message = content.message
+                    val chat = loadChatDetails(message.chatId)
+
+                    // Показываем уведомление только для входящих сообщений
+                    if (!message.isOutgoing) {
+                        val text = when (message.content) {
+                            is TdApi.MessageText -> (message.content as TdApi.MessageText).text.text
+                            is TdApi.MessagePhoto -> "Фото: ${(message.content as TdApi.MessagePhoto).caption.text}"
+                            is TdApi.MessageVideo -> "Видео: ${(message.content as TdApi.MessageVideo).caption.text}"
+                            is TdApi.MessageSticker -> "Стикер: ${(message.content as TdApi.MessageSticker).sticker.emoji}"
+                            else -> "Новое сообщение"
+                        }
+
+                        NotificationHelper.showMessageNotification(
+                            context = getApplication(),
+                            chatId = chat.id,
+                            chatTitle = chat.title ?: "Неизвестный чат",
+                            message = text,
+                            notificationId = message.id.toInt()
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun handleNotificationGroup(update: TdApi.UpdateNotificationGroup) {
+        viewModelScope.launch {
+            update.addedNotifications?.forEach { notification ->
+                handleNotification(TdApi.UpdateNotification(update.notificationGroupId, notification))
+            }
+        }
     }
 
 

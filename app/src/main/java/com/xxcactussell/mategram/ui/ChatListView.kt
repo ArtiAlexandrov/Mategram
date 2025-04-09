@@ -456,6 +456,7 @@ private fun ChatItem(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
+            .clip(RoundedCornerShape(24.dp))
             .clickable {
                 // При клике вызываем переданный callback для открытия чата
                 onChatClick(chat.id)
