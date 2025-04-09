@@ -250,13 +250,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             avatarFileId = chat.photo?.big?.id
         }
-        val chatId = chat.id
+
         if (avatarFileId != null) {
             val file = TelegramRepository.getFile(avatarFileId)
-            if (file.local.isDownloadingCompleted) {
-                updateAvatarPath(chatId, file.local.path)
-            } else {
+            if (!file.local.isDownloadingCompleted) {
                 ensureFileDownload(avatarFileId)
+                // Ждём завершения загрузки
+                while (!TelegramRepository.getFile(avatarFileId).local.isDownloadingCompleted) {
+                    delay(100)
+                }
+                // Получаем обновлённый файл
+                return TelegramRepository.getFile(avatarFileId).local.path
             }
             return file.local.path
         }

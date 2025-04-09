@@ -446,8 +446,9 @@ private fun ChatItem(
     }
 
     var avatarPath by remember { mutableStateOf<String?>(null) }
-    val avatarSize by remember { mutableStateOf<TdApi.File?>(chat.photo?.small) }
-    LaunchedEffect(avatarSize) {
+
+    // Следим за изменением фото чата
+    LaunchedEffect(chat.photo) {
         avatarPath = viewModel.getChatAvatarPath(chat)
     }
 

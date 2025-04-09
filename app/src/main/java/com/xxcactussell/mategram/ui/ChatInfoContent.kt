@@ -37,7 +37,7 @@ fun ChatInfoContent(
 ) {
 
     var avatarPath by remember { mutableStateOf<String?>("") }
-    LaunchedEffect(avatarPath) {
+    LaunchedEffect(chat.photo) {
         avatarPath = viewModel.getChatAvatarPath(chat, "b")
     }
     Column(
