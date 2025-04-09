@@ -191,12 +191,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun getMessagesForChat(chatId: Long, fromMessage: Long = 0) {
         viewModelScope.launch(Dispatchers.IO) {
-            if (fromMessage == 0L) {
-                _messagesFromChat.value =
-                    TelegramRepository.getMessagesForChat(chatId, fromMessage).messages.toList()
-            } else {
-                _messagesFromChat.value +=
-                    TelegramRepository.getMessagesForChat(chatId, fromMessage).messages.toList()
+            try {
+                val response = TelegramRepository.getMessagesForChat(chatId, fromMessage)
+
+                _messagesFromChat.update { currentMessages ->
+                    if (fromMessage == 0L) {
+                        response.messages.toList()
+                    } else {
+                        // Добавляем только новые сообщения
+                        val existingIds = currentMessages.map { it.id }.toSet()
+                        val uniqueNewMessages = response.messages.filter { it.id !in existingIds }
+                        (currentMessages + uniqueNewMessages).distinctBy { it.id }
+                    }
+                }
+            } catch (e: Exception) {
+                println("Ошибка загрузки сообщений: ${e.message}")
             }
         }
     }
