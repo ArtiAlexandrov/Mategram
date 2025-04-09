@@ -47,18 +47,22 @@ import com.xxcactussell.mategram.kotlinx.telegram.flows.serviceNotificationFlow
 import com.xxcactussell.mategram.ui.FcmManager
 import com.xxcactussell.mategram.ui.FcmService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.FileInputStream
+import java.util.concurrent.atomic.AtomicBoolean
 
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = TelegramRepository
-    private val NotificationHelper = com.xxcactussell.mategram.ui.NotificationManager
     init {
         viewModelScope.launch {
             TelegramRepository.authStateFlow.collect { newState ->
@@ -135,7 +139,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     observeNewMessagesFromChat()
                     _me.value = api.getMe()
                     setNotificationOptions()
-                    observeNotifications()
                 }
             }
         }
@@ -500,49 +503,83 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun getMessageById(replyMessage: TdApi.MessageReplyToMessage): TdApi.Message? {
         return api.getMessage(replyMessage.chatId, replyMessage.messageId)
     }
+}
 
-    fun observeNotifications() {
-        viewModelScope.launch {
-            // Set up notification group observer first
-            launch {
-                api.notificationGroupFlow().collect { update ->
-                    Log.d("NotificationDebug", "Group Update: $update")
-                    when (update.type) {
-                        is TdApi.NotificationGroupTypeMessages -> {
-                            Log.d("NotificationDebug", "Message group: ${update.notificationGroupId}")
-                            Log.d("NotificationDebug", "Added notifications: ${update.addedNotifications?.size}")
-                            Log.d("NotificationDebug", "Removed notification ids: ${update.removedNotificationIds?.size}")
-                        }
-                        is TdApi.NotificationGroupTypeMentions -> {
-                            Log.d("NotificationDebug", "Mentions group: ${update.notificationGroupId}")
-                        }
-                        is TdApi.NotificationGroupTypeCalls -> {
-                            Log.d("NotificationDebug", "Calls group: ${update.notificationGroupId}")
-                        }
+fun getMimeType(fileName: String): String {
+    val extension = fileName.substringAfterLast('.', "")
+    return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
+}
+
+class NotificationViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val NotificationHelper = com.xxcactussell.mategram.ui.NotificationHelper
+
+    private var notificationJob: Job? = null
+    private val jobLock = AtomicBoolean(false)
+    private val _isObservingNotifications = MutableStateFlow(false)
+    val isObservingNotifications = _isObservingNotifications.asStateFlow()
+
+    fun startObservingNotifications() {
+        if (!jobLock.compareAndSet(false, true)) {
+            Log.d("NotificationJob", "Observer already starting or running")
+            return
+        }
+
+        notificationJob = viewModelScope.launch {
+            try {
+                // Parallel collection of notification flows
+                coroutineScope {
+                    launch {
+                        api.notificationGroupFlow()
+                            .distinctUntilChanged { old, new ->
+                                old.notificationGroupId == new.notificationGroupId &&
+                                        old.addedNotifications?.lastOrNull()?.id == new.addedNotifications?.lastOrNull()?.id
+                            }
+                            .collect { update ->
+                                Log.d("Notifications", "Group update received: ${update.notificationGroupId}")
+                                update.addedNotifications?.lastOrNull()?.let { lastNotification ->
+                                    handleNotification(TdApi.UpdateNotification(update.notificationGroupId, lastNotification))
+                                }
+                            }
                     }
-                    handleNotificationGroup(update)
-                }
-            }
 
-            // Then observe individual notifications
-            launch {
-                api.notificationFlow().collect { update ->
-                    Log.d("NotificationDebug", "Single notification: ${update.notification.id}")
-                    handleNotification(update)
-                }
-            }
-
-            // Finally check active notifications
-            launch {
-                api.activeNotificationsFlow().collect { groups ->
-                    Log.d("NotificationDebug", "Active notifications groups: ${groups.size}")
-                    groups.forEach { group ->
-                        Log.d("NotificationDebug", "Group ${group.id} has ${group.notifications.size} notifications")
+                    launch {
+                        api.notificationFlow()
+                            .distinctUntilChanged { old, new ->
+                                old.notification.id == new.notification.id
+                            }
+                            .collect { update ->
+                                Log.d("Notifications", "Single notification received: ${update.notification.id}")
+                                handleNotification(update)
+                            }
                     }
                 }
+            } catch (e: Exception) {
+                Log.e("Notifications", "Error observing notifications", e)
+            } finally {
+                jobLock.set(false)
             }
         }
     }
+
+    private fun stopObservingNotifications() {
+        notificationJob?.cancel()
+        notificationJob = null
+        _isObservingNotifications.value = false
+    }
+
+    // Call this when checking status
+    fun isNotificationObserverActive(): Boolean {
+        return notificationJob?.isActive == true && jobLock.get()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        notificationJob?.cancel()
+        jobLock.set(false)
+    }
+
+    private val messageCache = mutableMapOf<Long, MutableList<String>>() // chatId to messages
 
     private fun handleNotification(update: TdApi.UpdateNotification) {
         viewModelScope.launch {
@@ -552,41 +589,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val message = content.message
                     val chat = loadChatDetails(message.chatId)
 
-                    // Показываем уведомление только для входящих сообщений
                     if (!message.isOutgoing) {
                         val text = when (message.content) {
                             is TdApi.MessageText -> (message.content as TdApi.MessageText).text.text
-                            is TdApi.MessagePhoto -> "Фото: ${(message.content as TdApi.MessagePhoto).caption.text}"
-                            is TdApi.MessageVideo -> "Видео: ${(message.content as TdApi.MessageVideo).caption.text}"
-                            is TdApi.MessageSticker -> "Стикер: ${(message.content as TdApi.MessageSticker).sticker.emoji}"
+                            is TdApi.MessagePhoto -> "📷 ${(message.content as TdApi.MessagePhoto).caption.text}"
+                            is TdApi.MessageVideo -> "🎥 ${(message.content as TdApi.MessageVideo).caption.text}"
+                            is TdApi.MessageSticker -> (message.content as TdApi.MessageSticker).sticker.emoji
                             else -> "Новое сообщение"
                         }
 
+                        // Get or create message queue for this chat
+                        val messages = messageCache.getOrPut(chat.id) { ArrayDeque(5) }
+
+                        // Add new message and maintain max size
+                        if (messages.size > 5) {
+                            messages.removeAt(0) // Remove oldest message
+                        }
+                        messages.add(text)
+
+                        // Show notification with all cached messages
                         NotificationHelper.showMessageNotification(
                             context = getApplication(),
                             chatId = chat.id,
                             chatTitle = chat.title ?: "Неизвестный чат",
-                            message = text,
-                            notificationId = message.id.toInt()
+                            messages = messageCache[chat.id]?.reversed() ?: listOf(text),
+                            notificationId = update.notificationGroupId // Use chatId as notification ID
                         )
                     }
                 }
             }
         }
     }
-
-    private fun handleNotificationGroup(update: TdApi.UpdateNotificationGroup) {
-        viewModelScope.launch {
-            update.addedNotifications?.forEach { notification ->
-                handleNotification(TdApi.UpdateNotification(update.notificationGroupId, notification))
-            }
-        }
-    }
-
-
-}
-
-fun getMimeType(fileName: String): String {
-    val extension = fileName.substringAfterLast('.', "")
-    return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
 }
