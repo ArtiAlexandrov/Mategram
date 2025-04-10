@@ -41,6 +41,8 @@ import com.xxcactussell.mategram.kotlinx.telegram.flows.chatReadInboxFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.notificationGroupFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.unreadChatCountFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.unreadMessageCountFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onEach
@@ -54,7 +56,7 @@ import java.util.Date
 import java.util.Locale
 
 object TelegramRepository : UserKtx, ChatKtx {
-    private val coroutineScope = CoroutineScope(Dispatchers.Default)
+    val coroutineScope = CoroutineScope(Dispatchers.Default)
     override val api: TelegramFlow = TelegramFlow()
 
     var appContext: Context? = null
@@ -67,77 +69,16 @@ object TelegramRepository : UserKtx, ChatKtx {
         }
     }
 
-    val authStateFlow: Flow<AuthState> = api.authorizationStateFlow()
-        .onEach { state ->  // Используем onEach вместо map для side-effects
-            when (state) {
-                is TdApi.AuthorizationStateWaitTdlibParameters -> {
-                    println("MAPPER: Отправляем параметры TDLib...")
-                    try {
-                        api.setTdlibParameters(
-                            TelegramCredentials.useTestDc,
-                            TelegramCredentials.databaseDirectory,
-                            TelegramCredentials.filesDirectory,
-                            TelegramCredentials.encryptionKey,
-                            TelegramCredentials.useFileDatabase,
-                            TelegramCredentials.useChatInfoDatabase,
-                            TelegramCredentials.useMessageDatabase,
-                            TelegramCredentials.useSecretChats,
-                            TelegramCredentials.apiId,
-                            TelegramCredentials.apiHash,
-                            TelegramCredentials.systemLanguageCode,
-                            TelegramCredentials.deviceModel,
-                            TelegramCredentials.systemVersion,
-                            TelegramCredentials.applicationVersion
-                        )
-                        println("MAPPER: Параметры TDLib успешно отправлены")
-                    } catch (e: Exception) {
-                        println("MAPPER: Ошибка отправки параметров TDLib: ${e.message}")
-                    }
-                }
-            }
-        }
-        .map { state ->
-            when (state) {
-                is TdApi.AuthorizationStateWaitTdlibParameters -> {
-                    println("MAPPER: Отправляем параметры TDLib...")
-
-                    AuthState.WaitTdlibParameters
-                }
-
-                is TdApi.AuthorizationStateWaitPhoneNumber -> {
-                    println("MAPPER: Ожидаем номер телефона...")
-                    AuthState.WaitPhone
-                }
-
-                is TdApi.AuthorizationStateWaitCode -> {
-                    println("MAPPER: Ожидаем код подтверждения...")
-                    AuthState.WaitCode
-                }
-
-                is TdApi.AuthorizationStateWaitPassword -> {
-                    println("MAPPER: Ожидаем пароль...")
-                    AuthState.WaitPassword
-                }
-
-                is TdApi.AuthorizationStateReady -> {
-                    println("MAPPER: Авторизация завершена!")
-                    AuthState.Ready
-                }
-
-                else -> {
-                    println("MAPPER: Неизвестное внутреннее состояние: $state")
-                    AuthState.NoAuth
-                }
-            }
-        }
-        .distinctUntilChanged()
-        .flowOn(Dispatchers.IO)
-        .shareIn(coroutineScope, SharingStarted.WhileSubscribed(5000), replay = 1)
-
+    private val _authStateFlow = MutableSharedFlow<TdApi.AuthorizationState>(
+        replay = 1,
+        extraBufferCapacity = 1
+    )
+    val authStateFlow = _authStateFlow.asSharedFlow()
 
     // Запускаем подключение клиента TDLib.
     fun checkAuthState() {
         api.attachClient()
+
     }
 
     fun sendPhone(phone: String) {

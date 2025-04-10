@@ -12,6 +12,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import android.webkit.MimeTypeMap
+import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldRole
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -30,9 +31,12 @@ import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMe
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.openChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.sendMessage
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.setOption
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.setTdlibParameters
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.viewMessages
+import com.xxcactussell.mategram.kotlinx.telegram.flows.authorizationStateFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.notificationFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.notificationGroupFlow
 import com.xxcactussell.mategram.ui.FcmManager
@@ -41,8 +45,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import java.io.FileInputStream
@@ -50,27 +61,108 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-
     private val repository = TelegramRepository
+    private val _authState = MutableStateFlow<AuthState>(AuthState.Initial)
+    val authState: StateFlow<AuthState> = _authState.asStateFlow()
+
+    fun setAuthState(state: AuthState) {
+        viewModelScope.launch {
+            _authState.value = state
+        }
+    }
+
     init {
         viewModelScope.launch {
-            TelegramRepository.authStateFlow.collect { newState ->
-                println("AuthViewModel: получено состояние: $newState")
+            repository.authStateFlow.collect { state ->
+                Log.d("MainViewModel", "Raw auth state: $state")
             }
         }
     }
 
-    val authState: StateFlow<AuthState> = TelegramRepository.authStateFlow
-        .stateIn(
-            viewModelScope,
-            SharingStarted.Eagerly,
-            AuthState.Initial
-        )
-
-    // Проверка текущего состояния авторизации
     fun performAuthResult() {
         viewModelScope.launch {
             repository.checkAuthState()
+
+            api.authorizationStateFlow()
+                .onEach { state ->
+                    when (state) {
+                        is TdApi.AuthorizationStateWaitTdlibParameters -> {
+                            Log.d("MainViewModel", "Setting TDLib parameters...")
+                            try {
+                                api.setTdlibParameters(
+                                    TelegramCredentials.useTestDc,
+                                    TelegramCredentials.databaseDirectory,
+                                    TelegramCredentials.filesDirectory,
+                                    TelegramCredentials.encryptionKey,
+                                    TelegramCredentials.useFileDatabase,
+                                    TelegramCredentials.useChatInfoDatabase,
+                                    TelegramCredentials.useMessageDatabase,
+                                    TelegramCredentials.useSecretChats,
+                                    TelegramCredentials.apiId,
+                                    TelegramCredentials.apiHash,
+                                    TelegramCredentials.systemLanguageCode,
+                                    TelegramCredentials.deviceModel,
+                                    TelegramCredentials.systemVersion,
+                                    TelegramCredentials.applicationVersion
+                                )
+                                Log.d("MainViewModel", "TDLib parameters set successfully")
+                            } catch (e: Exception) {
+                                Log.e("MainViewModel", "Error setting TDLib parameters", e)
+                            }
+                        }
+                        else -> { /* ignore other states here */ }
+                    }
+                }
+                .map { state ->
+                    when (state) {
+                        is TdApi.AuthorizationStateWaitTdlibParameters -> {
+                            Log.d("MainViewModel", "Mapped: Waiting for TDLib parameters")
+                            AuthState.WaitTdlibParameters
+                        }
+                        is TdApi.AuthorizationStateWaitPhoneNumber -> {
+                            Log.d("MainViewModel", "Mapped: Waiting for phone")
+                            AuthState.WaitPhone
+                        }
+                        is TdApi.AuthorizationStateWaitCode -> {
+                            Log.d("MainViewModel", "Mapped: Waiting for code")
+                            AuthState.WaitCode
+                        }
+                        is TdApi.AuthorizationStateWaitPassword -> {
+                            Log.d("MainViewModel", "Mapped: Waiting for password")
+                            AuthState.WaitPassword
+                        }
+                        is TdApi.AuthorizationStateReady -> {
+                            Log.d("MainViewModel", "Mapped: Ready")
+                            AuthState.Ready
+                        }
+                        else -> {
+                            Log.d("MainViewModel", "Mapped: Unknown state: $state")
+                            AuthState.NoAuth
+                        }
+                    }
+                }
+                .distinctUntilChanged()
+                .flowOn(Dispatchers.IO)
+                .collect { mappedState ->
+                    Log.d("MainViewModel", "Updating state to: $mappedState")
+                    _authState.value = mappedState
+                }
+        }
+    }
+    private val _navigationEvent = MutableSharedFlow<Long>()
+    val navigationEvent = _navigationEvent.asSharedFlow()
+
+    fun openChat(chatId: Long) {
+        viewModelScope.launch {
+            try {
+                Log.d("MainViewModel", "Opening chat: $chatId")
+                api.openChat(chatId)
+
+                // Emit navigation event
+                _navigationEvent.emit(chatId)
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Failed to open chat: ${e.message}")
+            }
         }
     }
 
@@ -491,6 +583,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     suspend fun getMessageById(replyMessage: TdApi.MessageReplyToMessage): TdApi.Message? {
         return api.getMessage(replyMessage.chatId, replyMessage.messageId)
+    }
+
+    fun handleNotificationOpen(chatId: Long) {
+        viewModelScope.launch {
+            try {
+                // Ensure TDLib is ready
+                api.authorizationStateFlow().firstOrNull()?.let { state ->
+                    when (state) {
+                        is TdApi.AuthorizationStateReady -> {
+                            // Open chat
+                            TdApi.OpenChat(chatId)
+                        }
+                        else -> {
+                            Log.e("MainViewModel", "TDLib not ready when opening chat")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Error opening chat from notification", e)
+            }
+        }
     }
 }
 

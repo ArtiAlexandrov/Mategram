@@ -1,5 +1,6 @@
 package com.xxcactussell.mategram.ui
 
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.EnterTransition
@@ -122,6 +123,7 @@ import org.drinkless.tdlib.TdApi.MessageVideo
 import org.drinkless.tdlib.TdApi.Video
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.VerticalDragHandle
+import com.xxcactussell.mategram.MainActivity
 
 @OptIn(ExperimentalMaterial3WindowSizeClassApi::class, ExperimentalMaterial3AdaptiveApi::class,
     ExperimentalMaterial3Api::class
@@ -146,6 +148,7 @@ fun ChatListView(
         viewModel.updateChatsFromNetworkForView()
     }
 
+
     LaunchedEffect(me) {
         if (me!=null) {
             chatMe = api.createPrivateChat(me!!.id, true)
@@ -169,6 +172,7 @@ fun ChatListView(
             currentWindowAdaptiveInfo()
         )
     )
+
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior(rememberTopAppBarState())
     // Отслеживаем выбранный чат через navigator
     val selectedChatId = navigator.currentDestination?.contentKey
@@ -178,6 +182,7 @@ fun ChatListView(
         selectedChat = chats.find { it.id == selectedChatId }
         selectedChatForInfoPane = chats.find { it.id == selectedChatId }
     }
+    val activity = (LocalActivity.current as? MainActivity)?.intent
 
     if (showBottomSheet && selectedChatForInfoPane != null) {
         ModalBottomSheet(
@@ -428,6 +433,25 @@ fun ChatListView(
             )
         }
     )
+
+    LaunchedEffect(activity) {
+        val chatIdFromIntent = activity?.getLongExtra("chat_id", 0L)
+        if (chatIdFromIntent != 0L) {
+            // Clear the intent to prevent reopening
+            activity?.removeExtra("chat_id")
+
+            Log.d("NAVIGATION", "Navigating to chat with ID: $chatIdFromIntent")
+            scope.launch {
+                navigator.navigateTo(ThreePaneScaffoldRole.Primary, chatIdFromIntent)
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.navigationEvent.collect { chatId ->
+            navigator.navigateTo(ThreePaneScaffoldRole.Primary, chatId)
+        }
+    }
 }
 
 // Обновляем ChatItem, добавляя параметр isSelected

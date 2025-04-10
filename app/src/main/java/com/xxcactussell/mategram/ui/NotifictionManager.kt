@@ -85,13 +85,14 @@ object NotificationHelper {
             }
 
             val intent = Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra("chat_id", chatId)
+                putExtra("from_notification", true)
             }
 
             val pendingIntent = PendingIntent.getActivity(
                 context,
-                notificationId,
+                chatId.toInt(), // Use chatId as request code
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
