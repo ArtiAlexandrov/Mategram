@@ -43,7 +43,8 @@ object NotificationHelper {
         chatTitle: String,
         messages: List<String>,
         chatPhotoFile: TdApi.File?,
-        notificationId: Int
+        notificationId: Int,
+        unreadCount: Int
     ) {
         val viewModelScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -100,7 +101,7 @@ object NotificationHelper {
 
             val inboxStyle = NotificationCompat.InboxStyle()
                 .setBigContentTitle(chatTitle)
-                .setSummaryText("${messages.size} новых сообщений")
+                .setSummaryText("$unreadCount новых сообщений")
 
             messages.asReversed().forEach { message ->
                 inboxStyle.addLine(message)
@@ -110,7 +111,7 @@ object NotificationHelper {
                 .setSmallIcon(R.drawable.baseline_local_fire_department_24)
                 .setLargeIcon(iconBitmap)
                 .setContentTitle(chatTitle)
-                .setContentText(messages.last())
+                .setContentText(messages.first())
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)

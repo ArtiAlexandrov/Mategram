@@ -606,6 +606,11 @@ class NotificationViewModel(application: Application) : AndroidViewModel(applica
                             messages.removeAt(0) // Remove oldest message
                         }
                         messages.add(text)
+                        val unreadCount = chat.unreadCount
+
+                        while (unreadCount < messages.size) {
+                            messages.removeAt(0)
+                        }
 
                         // Show notification with all cached messages
                         NotificationHelper.showMessageNotification(
@@ -614,7 +619,8 @@ class NotificationViewModel(application: Application) : AndroidViewModel(applica
                             chatTitle = chat.title ?: "Неизвестный чат",
                             messages = messageCache[chat.id]?.reversed() ?: listOf(text),
                             chatPhotoFile = chat.photo?.small, // Add chat photo
-                            notificationId = update.notificationGroupId // Use chatId as notification ID
+                            notificationId = update.notificationGroupId,
+                            unreadCount = unreadCount // Use chatId as notification ID
                         )
                     }
                 }
