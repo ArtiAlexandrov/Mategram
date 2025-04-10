@@ -8,16 +8,13 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.application
 import androidx.lifecycle.viewModelScope
-import com.google.firebase.messaging.FirebaseMessaging
 import com.xxcactussell.mategram.domain.entity.AuthState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -29,32 +26,24 @@ import com.xxcactussell.mategram.TelegramRepository.api
 import com.xxcactussell.mategram.TelegramRepository.loadChatDetails
 import com.xxcactussell.mategram.TelegramRepository.loadChatFolder
 import com.xxcactussell.mategram.TelegramRepository.loadChatIds
-import com.xxcactussell.mategram.TelegramRepository.updateNotificationGroupFlow
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.addFileToDownloads
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMe
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.registerDevice
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.sendMessage
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.setOption
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.setTdlibParameters
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.viewMessages
-import com.xxcactussell.mategram.kotlinx.telegram.flows.activeNotificationsFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.notificationFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.notificationGroupFlow
-import com.xxcactussell.mategram.kotlinx.telegram.flows.serviceNotificationFlow
 import com.xxcactussell.mategram.ui.FcmManager
-import com.xxcactussell.mategram.ui.FcmService
+import com.xxcactussell.mategram.ui.NotificationHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.FileInputStream
 import java.util.concurrent.atomic.AtomicBoolean
@@ -579,7 +568,7 @@ class NotificationViewModel(application: Application) : AndroidViewModel(applica
         jobLock.set(false)
     }
 
-    private val messageCache = mutableMapOf<Long, MutableList<String>>() // chatId to messages
+    private val messageCache = mutableMapOf<Long, MutableList<NotificationHelper.MessageInfo>>() // chatId to messages
 
     private fun handleNotification(update: TdApi.UpdateNotification) {
         viewModelScope.launch {
@@ -588,39 +577,61 @@ class NotificationViewModel(application: Application) : AndroidViewModel(applica
                 is TdApi.NotificationTypeNewMessage -> {
                     val message = content.message
                     val chat = loadChatDetails(message.chatId)
+                    var senderName = ""
+                    var title = ""
+                    var chatPhoto: TdApi.File? = null
+                    var isChannelPost = message.isChannelPost
+                    when (val sender = message.senderId) {
+                        is TdApi.MessageSenderUser -> {
+                            val user = api.getUser(sender.userId)
+                            chatPhoto = user.profilePhoto?.small
+                            if (chat.type is TdApi.ChatTypeBasicGroup || chat.type is TdApi.ChatTypeSupergroup) {
+                                title = chat.title
+                            } else {
+                                title = "${chat.unreadCount} новых сообщений"
+                            }
+                            senderName = user.firstName + " " + user.lastName
+                            Log.d("NotificationDebug", "Received message from user: ${user.firstName} ${user.lastName}")
+                        }
+                        is TdApi.MessageSenderChat -> {
+                            val chatSender = api.getChat(sender.chatId)
+                            senderName = chatSender.title ?: "Неизвестный чат"
+                            Log.d("NotificationDebug", "Received message from chat: ${chat.title}")
+                            chatPhoto = chat.photo?.small
+                        }
+                    }
 
                     if (!message.isOutgoing) {
-                        val text = when (message.content) {
-                            is TdApi.MessageText -> (message.content as TdApi.MessageText).text.text
-                            is TdApi.MessagePhoto -> "📷 ${(message.content as TdApi.MessagePhoto).caption.text}"
-                            is TdApi.MessageVideo -> "🎥 ${(message.content as TdApi.MessageVideo).caption.text}"
-                            is TdApi.MessageSticker -> (message.content as TdApi.MessageSticker).sticker.emoji
-                            else -> "Новое сообщение"
-                        }
+                        val messageInfo = com.xxcactussell.mategram.ui.NotificationHelper.MessageInfo(
+                            text = when (message.content) {
+                                is TdApi.MessageText -> (message.content as TdApi.MessageText).text.text
+                                is TdApi.MessagePhoto -> "📷 ${(message.content as TdApi.MessagePhoto).caption.text}"
+                                is TdApi.MessageVideo -> "🎥 ${(message.content as TdApi.MessageVideo).caption.text}"
+                                is TdApi.MessageSticker -> (message.content as TdApi.MessageSticker).sticker.emoji
+                                else -> "Новое сообщение"
+                            },
+                            timestamp = message.date * 1000L, // Convert to milliseconds
+                            senderName = senderName
+                        )
 
                         // Get or create message queue for this chat
-                        val messages = messageCache.getOrPut(chat.id) { ArrayDeque(5) }
+                        val messages = messageCache.getOrPut(chat.id) { mutableListOf() }
+                        messages.add(messageInfo)
 
-                        // Add new message and maintain max size
-                        if (messages.size > 5) {
-                            messages.removeAt(0) // Remove oldest message
-                        }
-                        messages.add(text)
-                        val unreadCount = chat.unreadCount
-
-                        while (unreadCount < messages.size) {
+                        // Trim messages list
+                        while (messages.size > chat.unreadCount || messages.size > 5) {
                             messages.removeAt(0)
                         }
-
                         // Show notification with all cached messages
                         NotificationHelper.showMessageNotification(
                             context = getApplication(),
                             chatId = chat.id,
-                            chatTitle = chat.title ?: "Неизвестный чат",
-                            messages = messageCache[chat.id]?.reversed() ?: listOf(text),
-                            chatPhotoFile = chat.photo?.small, // Add chat photo
+                            chatTitle = title,
+                            messages = messages,
+                            chatPhotoFile = chatPhoto, // Add chat photo
                             notificationId = update.notificationGroupId,
-                            unreadCount = unreadCount // Use chatId as notification ID
+                            unreadCount = chat.unreadCount, // Use chatId as notification ID
+                            isChannelPost = isChannelPost
                         )
                     }
                 }
