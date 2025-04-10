@@ -30,6 +30,7 @@ import com.xxcactussell.mategram.TelegramRepository.loadChatIds
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMe
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getScopeNotificationSettings
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.openChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.sendMessage
@@ -686,10 +687,18 @@ class NotificationViewModel(application: Application) : AndroidViewModel(applica
     private fun handleNotification(update: TdApi.UpdateNotification) {
         viewModelScope.launch {
             Log.d("NotificationDebug", "Received notification: ${update.notification.type}")
+
             when (val content = update.notification.type) {
                 is TdApi.NotificationTypeNewMessage -> {
                     val message = content.message
                     val chat = loadChatDetails(message.chatId)
+
+                    val isMuted = !content.showPreview
+                    if (isMuted) {
+                        Log.d("NotificationDebug", "Notifications muted for chat ${chat.id}")
+                        return@launch
+                    }
+
                     var senderName = ""
                     var title = ""
                     var chatPhoto: TdApi.File? = null
