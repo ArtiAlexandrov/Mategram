@@ -25,6 +25,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -36,6 +37,7 @@ import com.google.firebase.FirebaseApp
 import com.xxcactussell.mategram.TelegramRepository.api
 import com.xxcactussell.mategram.domain.entity.AuthState
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getAuthorizationState
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.setOption
 import com.xxcactussell.mategram.ui.ChatListView
 import com.xxcactussell.mategram.ui.FcmManager
 import com.xxcactussell.mategram.ui.Login2FAView
@@ -60,7 +62,6 @@ class MainActivity : ComponentActivity() {
         fcmManager = FcmManager.getInstance(this)
         requestNotificationPermissions()
         createNotificationChannel()
-
         handleIntent(intent)
 
         enableEdgeToEdge()
@@ -110,6 +111,7 @@ class MainActivity : ComponentActivity() {
 
                 when (authState) {
                     AuthState.Ready -> {
+                        viewModel.setOnline(true)
                         ChatListView(
                             viewModel = viewModel
                         )
@@ -175,6 +177,10 @@ class MainActivity : ComponentActivity() {
         notificationManager.createNotificationChannel(channel)
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        viewModel.setOnline(false)
+    }
 }
 
 @Composable
@@ -200,6 +206,7 @@ private fun AuthStateContent(
             }
         }
         AuthState.Ready -> {
+            TdApi.SetOption("online", TdApi.OptionValueBoolean(true))
             ChatListView()
         }
     }

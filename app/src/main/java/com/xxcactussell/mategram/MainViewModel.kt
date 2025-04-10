@@ -606,6 +606,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    fun setOnline(b: Boolean) {
+        viewModelScope.launch {
+            api.setOption("online", TdApi.OptionValueBoolean(b))
+        }
+    }
 }
 
 fun getMimeType(fileName: String): String {
@@ -688,17 +694,47 @@ class NotificationViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             Log.d("NotificationDebug", "Received notification: ${update.notification.type}")
 
+            val settingsManager = NotificationSettingsManager.getInstance(getApplication())
+            val settings = settingsManager.loadNotificationSettings()
+
+            // Check global notification settings first
+            if (!settings.globalEnabled) {
+                Log.d("NotificationDebug", "Notifications globally disabled")
+                return@launch
+            }
+
             when (val content = update.notification.type) {
                 is TdApi.NotificationTypeNewMessage -> {
                     val message = content.message
                     val chat = loadChatDetails(message.chatId)
 
-                    val isMuted = !content.showPreview
+                    // Get scope settings based on chat type
+                    val scopeKey = when (chat.type) {
+                        is TdApi.ChatTypePrivate, is TdApi.ChatTypeSecret -> "private_chats"
+                        is TdApi.ChatTypeBasicGroup -> "group_chats"
+                        is TdApi.ChatTypeSupergroup -> {
+                            if ((chat.type as TdApi.ChatTypeSupergroup).isChannel) "channel_chats"
+                            else "group_chats"
+                        }
+                        else -> "private_chats"
+                    }
+
+                    val scopeSettings = settings.scopeSettings[scopeKey]
+                    val chatSettings = settings.chatSettings[chat.id]
+
+                    // Check if notifications are muted
+                    val isMuted = when {
+                        chatSettings?.useDefault == false && chatSettings.muteFor > 0 -> true
+                        chatSettings?.useDefault == true && (scopeSettings?.muteFor ?: 0) > 0 -> true
+                        else -> false
+                    }
+
                     if (isMuted) {
                         Log.d("NotificationDebug", "Notifications muted for chat ${chat.id}")
                         return@launch
                     }
 
+                    // Process sender information
                     var senderName = ""
                     var title = ""
                     var chatPhoto: TdApi.File? = null
@@ -724,35 +760,39 @@ class NotificationViewModel(application: Application) : AndroidViewModel(applica
                     }
 
                     if (!message.isOutgoing) {
-                        val messageInfo = com.xxcactussell.mategram.ui.NotificationHelper.MessageInfo(
-                            text = when (message.content) {
-                                is TdApi.MessageText -> (message.content as TdApi.MessageText).text.text
-                                is TdApi.MessagePhoto -> "📷 ${(message.content as TdApi.MessagePhoto).caption.text}"
-                                is TdApi.MessageVideo -> "🎥 ${(message.content as TdApi.MessageVideo).caption.text}"
-                                is TdApi.MessageSticker -> (message.content as TdApi.MessageSticker).sticker.emoji
-                                else -> "Новое сообщение"
-                            },
-                            timestamp = message.date * 1000L, // Convert to milliseconds
-                            senderName = senderName
-                        )
+                        val messageInfo =
+                            com.xxcactussell.mategram.ui.NotificationHelper.MessageInfo(
+                                text = when (message.content) {
+                                    is TdApi.MessageText -> (message.content as TdApi.MessageText).text.text
+                                    is TdApi.MessagePhoto -> "📷 ${(message.content as TdApi.MessagePhoto).caption.text}"
+                                    is TdApi.MessageVideo -> "🎥 ${(message.content as TdApi.MessageVideo).caption.text}"
+                                    is TdApi.MessageSticker -> (message.content as TdApi.MessageSticker).sticker.emoji
+                                    else -> "Новое сообщение"
+                                },
+                                timestamp = message.date * 1000L,
+                                senderName = senderName
+                            )
 
-                        // Get or create message queue for this chat
                         val messages = messageCache.getOrPut(chat.id) { mutableListOf() }
                         messages.add(messageInfo)
 
-                        // Trim messages list
                         while (messages.size > chat.unreadCount || messages.size > 5) {
                             messages.removeAt(0)
                         }
-                        // Show notification with all cached messages
+
+                        // Check preview settings
+                        val showPreview = when {
+                            chatSettings?.useDefault == false -> chatSettings.showPreview
+                            else -> scopeSettings?.showPreview ?: true
+                        }
                         NotificationHelper.showMessageNotification(
                             context = getApplication(),
                             chatId = chat.id,
                             chatTitle = title,
                             messages = messages,
-                            chatPhotoFile = chatPhoto, // Add chat photo
+                            chatPhotoFile = chatPhoto,
                             notificationId = update.notificationGroupId,
-                            unreadCount = chat.unreadCount, // Use chatId as notification ID
+                            unreadCount = chat.unreadCount,
                             isChannelPost = isChannelPost
                         )
                     }
