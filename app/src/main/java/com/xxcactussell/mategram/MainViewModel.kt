@@ -282,7 +282,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     handleChatAddedToList(update)
                 }
             }
+            launch {
+                repository.chatDraftUpdate.collect { update ->
+                    handleChatDraft(update)
+                }
+            }
         }
+    }
+
+    private suspend fun handleChatDraft(update: TdApi.UpdateChatDraftMessage) {
+        val chatId = update.chatId
+        Log.d("ChatUpdater" , "$chatId")
+        handleChatUpdate(api.getChat(update.chatId))
     }
 
     private suspend fun handleChatAddedToList(update: TdApi.UpdateChatAddedToList) {
@@ -728,7 +739,10 @@ class NotificationViewModel(application: Application) : AndroidViewModel(applica
                 is TdApi.NotificationTypeNewMessage -> {
                     val message = content.message
                     val chat = loadChatDetails(message.chatId)
-
+                    if (chat.unreadCount == 0) {
+                        Log.d("NotificationDebug", "Chat ${chat.id} has 0 unread messages, skipping notification")
+                        return@launch
+                    }
                     // Get scope settings based on chat type
                     val scopeKey = when (chat.type) {
                         is TdApi.ChatTypePrivate, is TdApi.ChatTypeSecret -> "private_chats"

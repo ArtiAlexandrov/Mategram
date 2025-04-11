@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.res.Resources
 import android.os.Build
 import android.util.Base64
+import com.google.android.datatransport.BuildConfig
 import com.xxcactussell.mategram.TelegramRepository.appContext
 import java.io.File
 import java.security.SecureRandom
@@ -49,6 +50,6 @@ class TelegramCredentials {
         val systemLanguageCode = Resources.getSystem().configuration.locales[0].toString()
         val deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}"
         val systemVersion: String = Build.VERSION.RELEASE
-        const val applicationVersion = "0.0.5beta"
+        const val applicationVersion = BuildConfig.VERSION_NAME
     }
 }

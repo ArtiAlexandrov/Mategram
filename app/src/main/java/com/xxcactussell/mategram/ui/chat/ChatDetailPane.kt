@@ -157,25 +157,34 @@ fun ChatDetailPane(
         }
     }
 
-    LaunchedEffect(chatId) {
+// Прокрутка к первому непрочитанному сообщению при первой загрузке чата
+    LaunchedEffect(chat?.unreadCount) {
         val unreadIndex = chat?.unreadCount ?: 0
         if (unreadIndex > 0 && unreadIndex < messagesForChat.size) {
             listState.animateScrollToItem(unreadIndex - 1)
         }
     }
 
+// Отслеживание видимых сообщений и отметка их как прочитанных
     LaunchedEffect(listState) {
-        snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
-        .collect { visibleIndexes ->
-            val visibleUnreadMessages = messagesForChat.filterIndexed { index, message ->
-                index in visibleIndexes && index < (chat?.unreadCount
-                    ?: 0) && !message.isOutgoing
-            }
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo }
+            .collect { visibleItems ->
+                if (visibleItems.isEmpty()) return@collect
 
-            visibleUnreadMessages.forEach { message ->
-                viewModel.markAsRead(message)
+                val unreadCount = chat?.unreadCount ?: 0
+                if (unreadCount == 0) return@collect
+
+                val visibleIndexes = visibleItems.map { it.index }
+                val visibleUnreadMessages = messagesForChat.filterIndexed { index, message ->
+                    index in visibleIndexes &&
+                            index < unreadCount &&
+                            !message.isOutgoing
+                }
+
+                visibleUnreadMessages.forEach { message ->
+                    viewModel.markAsRead(message)
+                }
             }
-        }
     }
 
     Scaffold(

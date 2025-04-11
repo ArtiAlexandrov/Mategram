@@ -36,6 +36,7 @@ import kotlinx.coroutines.launch
 import kotlinx.telegram.extensions.ChatKtx
 import com.xxcactussell.mategram.kotlinx.telegram.extensions.UserKtx
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatAddedToListFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.chatDraftMessageFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatFoldersFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatLastMessageFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatPositionFlow
@@ -173,6 +174,12 @@ object TelegramRepository : UserKtx, ChatKtx {
         started = SharingStarted.WhileSubscribed(5000),
         replay = 5
     )
+
+    val chatDraftUpdate: Flow<TdApi.UpdateChatDraftMessage> = api.chatDraftMessageFlow().shareIn(
+        scope = chatUpdatesScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        replay = 5
+    )
 }
 
 suspend fun isUserContact(userId: Long): Boolean {
@@ -190,6 +197,18 @@ fun convertUnixTimestampToDateByDay(timestamp: Long): String {
     val date = Date(timestamp * 1000)
     val format = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
     return format.format(date)
+}
+
+fun converUnixTimeStampForChatList(timestamp: Long): String {
+    val dateTime = Date(timestamp * 1000)
+    val date = timestamp / 86400
+    var format = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
+    if (date == getDayFromDate(System.currentTimeMillis() / 1000)) {
+        format = SimpleDateFormat("HH:mm", Locale.getDefault())
+    } else if (date < getDayFromDate(System.currentTimeMillis() / 1000)) {
+        format = SimpleDateFormat("dd.MM", Locale.getDefault())
+    }
+    return format.format(dateTime)
 }
 
 fun getDayFromDate(date: Long): Long {

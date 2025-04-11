@@ -125,6 +125,7 @@ import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.VerticalDragHandle
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import com.xxcactussell.mategram.MainActivity
+import com.xxcactussell.mategram.converUnixTimeStampForChatList
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.closeChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatFolder
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.openChat
@@ -783,12 +784,20 @@ private fun ChatItem(
                 }//messageAnimation, , , messageDice, , , messageGiveawayWinners, messageInvoice, messageLocation, messagePaidMedia, messageSticker, messageStory,, messageVenue
             }
             Spacer(modifier = Modifier.width(16.dp))
-            if (chat.unreadCount > 0) {
-                Badge (
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                ) {
-                    Text("${chat.unreadCount}")
+            chat.lastMessage?.date?.toLong()
+            Column (
+                horizontalAlignment = Alignment.End,
+            )
+            {
+                Text(converUnixTimeStampForChatList(chat.lastMessage?.date?.toLong() ?: 0L), style = MaterialTheme.typography.labelSmall)
+                Spacer(modifier = Modifier.height(4.dp))
+                if (chat.unreadCount > 0) {
+                    Badge (
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ) {
+                        Text("${chat.unreadCount}")
+                    }
                 }
             }
         }
