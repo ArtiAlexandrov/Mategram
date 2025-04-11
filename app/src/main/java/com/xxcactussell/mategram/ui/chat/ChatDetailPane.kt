@@ -49,6 +49,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -74,10 +75,13 @@ import com.xxcactussell.mategram.MainViewModel
 import com.xxcactussell.mategram.R
 import com.xxcactussell.mategram.TelegramRepository.api
 import com.xxcactussell.mategram.convertUnixTimestampToDate
+import com.xxcactussell.mategram.convertUnixTimestampToDateByDay
 import com.xxcactussell.mategram.formatFileSize
+import com.xxcactussell.mategram.getDayFromDate
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 import org.drinkless.tdlib.TdApi.MessagePhoto
@@ -99,6 +103,7 @@ fun ChatDetailPane(
     var chat: TdApi.Chat? by remember { mutableStateOf(null) }
     LaunchedEffect(chatId) {
         chat = api.getChat(chatId)
+        viewModel.getMessagesForChat(chatId)
     }
     var textNewMessage by remember { mutableStateOf("") }
     // Если chat != null, вызываем Flow для получения пути аватарки, иначе используем flowOf(null):
@@ -106,7 +111,9 @@ fun ChatDetailPane(
     // так что при изменении chat будет пересчитано значение avatarPath.
 
     val scope = rememberCoroutineScope()
-    val messagesForChat by viewModel.messagesFromChat.collectAsState()
+    val messagesForChat by viewModel.mapOfMessages.getOrPut(chatId) {
+        MutableStateFlow(mutableListOf())
+    }.collectAsState()
     var groupedMessages = groupMessagesByAlbum(messagesForChat)
     val listState = rememberLazyListState()
     var avatarPath by remember { mutableStateOf<String?>(null) }
@@ -116,44 +123,41 @@ fun ChatDetailPane(
         avatarPath = chat?.let { viewModel.getChatAvatarPath(it) }
     }
 
-    LaunchedEffect(chatId) {
-        viewModel.setHandlerForChat(chatId)
-        viewModel.getMessagesForChat(chatId)
-    }
 
     var isLoadingMore by remember { mutableStateOf(false) }
 
     LaunchedEffect(listState, messagesForChat) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo }
-            .collect { visibleItems ->
-                if (visibleItems.isEmpty() || isLoadingMore) return@collect
+        .collect { visibleItems ->
+            if (visibleItems.isEmpty() || isLoadingMore) return@collect
 
-                val lastVisibleItem = visibleItems.last()
-                groupedMessages = groupMessagesByAlbum(messagesForChat)
+            val lastVisibleItem = visibleItems.last()
+            groupedMessages = groupMessagesByAlbum(messagesForChat)
 
-                // Проверяем, близки ли мы к концу списка
-                if (lastVisibleItem.index >= groupedMessages.size - 5) {
-                    val lastMessage = when (val item = groupedMessages.lastOrNull()) {
-                        is MediaAlbum -> item.messages.last()
-                        is TdApi.Message -> item
-                        else -> null
-                    }
+            // Проверяем, близки ли мы к концу списка
+            if (lastVisibleItem.index >= groupedMessages.size - 5) {
+                val lastMessage = when (val item = groupedMessages.lastOrNull()) {
+                    is MediaAlbum -> item.messages.last()
+                    is TdApi.Message -> item
+                    else -> null
+                }
 
-                    if (lastMessage != null) {
-                        isLoadingMore = true
-                        try {
-                            viewModel.getMessagesForChat(
-                                chatId = chatId,
-                                fromMessage = lastMessage.id
-                            )
-                        } finally {
-                            isLoadingMore = false
-                        }
+                if (lastMessage != null) {
+                    isLoadingMore = true
+                    try {
+                        viewModel.getMessagesForChat(
+                            chatId = chatId,
+                            fromMessage = lastMessage.id
+                        )
+                    } finally {
+                        isLoadingMore = false
                     }
                 }
             }
+        }
     }
-    LaunchedEffect(messagesForChat.size) {
+
+    LaunchedEffect(chatId) {
         val unreadIndex = chat?.unreadCount ?: 0
         if (unreadIndex > 0 && unreadIndex < messagesForChat.size) {
             listState.animateScrollToItem(unreadIndex - 1)
@@ -162,17 +166,16 @@ fun ChatDetailPane(
 
     LaunchedEffect(listState) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
-            .collect { visibleIndexes ->
-                val visibleUnreadMessages = messagesForChat.filterIndexed { index, message ->
-                    index in visibleIndexes && index < (chat?.unreadCount
-                        ?: 0) && !message.isOutgoing
-                }
-
-                visibleUnreadMessages.forEach { message ->
-                    viewModel.markAsRead(message)
-                }
-                viewModel.updateChatsFromNetworkForView()
+        .collect { visibleIndexes ->
+            val visibleUnreadMessages = messagesForChat.filterIndexed { index, message ->
+                index in visibleIndexes && index < (chat?.unreadCount
+                    ?: 0) && !message.isOutgoing
             }
+
+            visibleUnreadMessages.forEach { message ->
+                viewModel.markAsRead(message)
+            }
+        }
     }
 
     Scaffold(
@@ -292,6 +295,8 @@ fun ChatDetailPane(
             items(groupedMessages.size) { index ->
                 var isDateShown by remember { mutableStateOf(false) }
                 var date by remember { mutableStateOf("") }
+                var dateToCompare by remember { mutableLongStateOf(0L) }
+                var nextDateToCompare by remember { mutableLongStateOf(0L) }
                 Spacer(modifier = Modifier.height(8.dp))
                 when (val item = groupedMessages[index]) {
                     is MediaAlbum -> {
@@ -1248,6 +1253,55 @@ fun ChatDetailPane(
                             }
                         }
                     }
+                }
+                try {
+                    when (groupedMessages[index]) {
+                        is MediaAlbum -> {
+                            dateToCompare = getDayFromDate(
+                                (groupedMessages[index] as MediaAlbum).date.toLong()
+                            )
+                        }
+
+                        is TdApi.Message -> {
+                            dateToCompare = getDayFromDate(
+                                (groupedMessages[index] as TdApi.Message).date.toLong()
+                            )
+                        }
+                    }
+                    when (groupedMessages[index + 1]) {
+                        is MediaAlbum -> {
+                            nextDateToCompare = getDayFromDate(
+                                (groupedMessages[index + 1] as MediaAlbum).date.toLong()
+                            )
+                        }
+
+                        is TdApi.Message -> {
+                            nextDateToCompare = getDayFromDate(
+                                (groupedMessages[index + 1] as TdApi.Message).date.toLong()
+                            )
+                        }
+                    }
+                } catch (e: IndexOutOfBoundsException) {
+                    // Игнорируем ошибку выхода за пределы массива
+                }
+                if (nextDateToCompare < dateToCompare) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = convertUnixTimestampToDateByDay(dateToCompare * 86400),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
             }
             // Индикатор загрузки

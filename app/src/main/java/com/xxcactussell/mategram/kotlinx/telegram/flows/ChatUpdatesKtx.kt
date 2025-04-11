@@ -66,17 +66,17 @@ fun TelegramFlow.newChatFlow(): Flow<Chat> = this.getUpdatesFlowOfType<TdApi.Upd
 /**
  * emits [UpdateChatTitle] if the title of a chat was changed.
  */
-fun TelegramFlow.chatTitleFlow(): Flow<UpdateChatTitle> = this.getUpdatesFlowOfType()
+fun TelegramFlow.chatTitleFlow(): Flow<UpdateChatTitle> = this.getUpdatesFlowOfType<UpdateChatTitle>()
 
 /**
  * emits [UpdateChatPhoto] if a chat photo was changed.
  */
-fun TelegramFlow.chatPhotoFlow(): Flow<UpdateChatPhoto> = this.getUpdatesFlowOfType()
+fun TelegramFlow.chatPhotoFlow(): Flow<UpdateChatPhoto> = this.getUpdatesFlowOfType<UpdateChatPhoto>()
 
 /**
  * emits [UpdateChatAccentColors] if chat accent colors have changed.
  */
-fun TelegramFlow.chatAccentColorsFlow(): Flow<UpdateChatAccentColors> = this.getUpdatesFlowOfType()
+fun TelegramFlow.chatAccentColorsFlow(): Flow<UpdateChatAccentColors> = this.getUpdatesFlowOfType<UpdateChatAccentColors>()
 
 /**
  * emits [UpdateChatPermissions] if chat permissions were changed.
@@ -86,7 +86,7 @@ fun TelegramFlow.chatPermissionsFlow(): Flow<UpdateChatPermissions> = this.getUp
 /**
  * emits [UpdateChatLastMessage] if the last message of a chat was changed.
  */
-fun TelegramFlow.chatLastMessageFlow(): Flow<UpdateChatLastMessage> = this.getUpdatesFlowOfType()
+fun TelegramFlow.chatLastMessageFlow(): Flow<UpdateChatLastMessage> = this.getUpdatesFlowOfType<UpdateChatLastMessage>()
 
 /**
  * emits [UpdateChatPosition] if the position of a chat in a chat list has changed. An
@@ -97,7 +97,7 @@ fun TelegramFlow.chatPositionFlow(): Flow<UpdateChatPosition> = this.getUpdatesF
 /**
  * emits [UpdateChatAddedToList] if a chat was added to a chat list.
  */
-fun TelegramFlow.chatAddedToListFlow(): Flow<UpdateChatAddedToList> = this.getUpdatesFlowOfType()
+fun TelegramFlow.chatAddedToListFlow(): Flow<UpdateChatAddedToList> = this.getUpdatesFlowOfType<UpdateChatAddedToList>()
 
 /**
  * emits [UpdateChatRemovedFromList] if a chat was removed from a chat list.

@@ -35,12 +35,20 @@ import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.launch
 import kotlinx.telegram.extensions.ChatKtx
 import com.xxcactussell.mategram.kotlinx.telegram.extensions.UserKtx
+import com.xxcactussell.mategram.kotlinx.telegram.flows.chatAddedToListFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatFoldersFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.chatLastMessageFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatPositionFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatReadInboxFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.chatTitleFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.newChatFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.notificationGroupFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.supergroupFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.supergroupFullInfoFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.unreadChatCountFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.unreadMessageCountFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.userFlow
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -57,6 +65,8 @@ import java.util.Locale
 
 object TelegramRepository : UserKtx, ChatKtx {
     val coroutineScope = CoroutineScope(Dispatchers.Default)
+    val chatUpdatesScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     override val api: TelegramFlow = TelegramFlow()
 
     var appContext: Context? = null
@@ -139,9 +149,30 @@ object TelegramRepository : UserKtx, ChatKtx {
         return result
     }
 
-    val getNewMessageFlow: Flow<TdApi.Message> = api.newMessageFlow()
 
-    val updateNotificationGroupFlow: Flow<TdApi.UpdateNotificationGroup> = api.notificationGroupFlow()
+    // Собираем события для loadchats
+
+    val newChatFlowUpdate: Flow<TdApi.Chat> = api.newChatFlow().shareIn(
+        scope = chatUpdatesScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        replay = 5
+    )
+    val chatLastMessageUpdate: Flow<TdApi.UpdateChatLastMessage> = api.chatLastMessageFlow().shareIn(
+        scope = chatUpdatesScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        replay = 5
+    )
+    val chatAddedToList: Flow<TdApi.UpdateChatAddedToList> = api.chatAddedToListFlow().shareIn(
+        scope = chatUpdatesScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        replay = 5
+    )
+
+    val chatReadInbox: Flow<TdApi.UpdateChatReadInbox> = api.chatReadInboxFlow().shareIn(
+        scope = chatUpdatesScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        replay = 5
+    )
 }
 
 suspend fun isUserContact(userId: Long): Boolean {
@@ -150,9 +181,19 @@ suspend fun isUserContact(userId: Long): Boolean {
 }
 
 fun convertUnixTimestampToDate(timestamp: Long): String {
-    val date = Date(timestamp * 1000) // Умножаем на 1000, так как timestamp в секундах
+    val date = Date(timestamp * 1000)
     val format = SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault())
     return format.format(date)
+}
+
+fun convertUnixTimestampToDateByDay(timestamp: Long): String {
+    val date = Date(timestamp * 1000)
+    val format = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+    return format.format(date)
+}
+
+fun getDayFromDate(date: Long): Long {
+    return date / 86400
 }
 
 @SuppressLint("DefaultLocale")

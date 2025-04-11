@@ -12,25 +12,16 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import android.webkit.MimeTypeMap
-import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldRole
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.xxcactussell.mategram.domain.entity.AuthState
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
-import org.drinkless.tdlib.TdApi
 import com.xxcactussell.mategram.TelegramRepository.api
 import com.xxcactussell.mategram.TelegramRepository.loadChatDetails
-import com.xxcactussell.mategram.TelegramRepository.loadChatFolder
-import com.xxcactussell.mategram.TelegramRepository.loadChatIds
+import com.xxcactussell.mategram.domain.entity.AuthState
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatFolder
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMe
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getScopeNotificationSettings
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.openChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.sendMessage
@@ -42,11 +33,15 @@ import com.xxcactussell.mategram.kotlinx.telegram.flows.notificationFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.notificationGroupFlow
 import com.xxcactussell.mategram.ui.FcmManager
 import com.xxcactussell.mategram.ui.NotificationHelper
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -54,10 +49,15 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.drinkless.tdlib.TdApi
+import org.drinkless.tdlib.TdApi.Chat
+import org.drinkless.tdlib.TdApi.Chats
+import org.drinkless.tdlib.TdApi.GetChats
 import java.io.FileInputStream
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 
@@ -199,9 +199,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private val _visibleChats = MutableStateFlow<List<TdApi.Chat>>(emptyList())
-    val visibleChats: StateFlow<List<TdApi.Chat>> = _visibleChats
-
     private var _me = MutableStateFlow<TdApi.User?>(null)
     val me : StateFlow<TdApi.User?> = _me
 
@@ -216,11 +213,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val context = getApplication<Application>().applicationContext
                     FcmManager(context).getFcmToken()
                         ?.let { FcmManager(context).registerDeviceToken(it) }
-                    loadFolders()
-                    observeChatUpdates()
-                    observeNewMessagesFromChat()
                     _me.value = api.getMe()
                     setNotificationOptions()
+                    observeAllChatUpdates()
+                    updateChatsFromNetworkForView()
+                    observeChatUpdates()
+                    observeUnreadCount()
                 }
             }
         }
@@ -242,123 +240,146 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private var _chatFolders = MutableStateFlow<List<TdApi.ChatFolder>>(emptyList())
-    var chatFolders: StateFlow<List<TdApi.ChatFolder>> = _chatFolders
-    private val chatFoldersIds = mutableListOf<Int>()
-
-    fun updateChatsFromNetworkForView(limit: Int = Int.MAX_VALUE) {
-        try {
-            viewModelScope.launch(Dispatchers.IO) {
-                val chatsIds = loadChatIds(limit)
-                val chatsFromNetwork = chatsIds.map { loadChatDetails(it) }
-                _visibleChats.value = chatsFromNetwork
-            }
-        } catch (e: Exception) {
-            println("Ошибка загрузки чатов: ${e.message}")
-        }
-    }
-
-    private fun loadFolders() {
-        try {
-            viewModelScope.launch(Dispatchers.IO) {
-                val chatsIds = loadChatIds()
-                val chatsFromNetwork = chatsIds.map { loadChatDetails(it) }
-                chatsFromNetwork.forEach { chat ->
-                    if(chat.chatLists != null) {
-                        chat.chatLists.forEach { position ->
-                            if (position is TdApi.ChatListFolder) {
-                                if(!chatFoldersIds.contains(position.chatFolderId)) {
-                                    val folderId = position.chatFolderId
-                                    chatFoldersIds.add(folderId)
-                                }
-                            }
-                        }
-                    }
-                }
-                chatFoldersIds.sorted()
-                chatFoldersIds.forEach {folderId ->
-                    val chatFolder = loadChatFolder(folderId)
-                    _chatFolders.value = _chatFolders.value.toMutableList().apply {
-                        add(chatFolder)
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            println("Ошибка загрузки чатов: ${e.message}")
-        }
-    }
-
-    private fun observeChatUpdates() {
-        viewModelScope.launch(Dispatchers.IO) {
-            TelegramRepository.messageFlow.collect { message ->
-                updateChatList(message.chatId)
-            }
-        }
-    }
 
 
 
-    private var _messagesFromChat = MutableStateFlow<List<TdApi.Message>>(emptyList())
-    val messagesFromChat: StateFlow<List<TdApi.Message>> = _messagesFromChat
+    private val _visibleChats = MutableStateFlow<List<TdApi.Chat>>(emptyList())
+    val visibleChats = _visibleChats.asStateFlow()
+    private val chatMap = mutableMapOf<Long, TdApi.Chat>()
 
-    private var chatIdForHandler: Long? = null
+    private val chatUpdatesScope = TelegramRepository.chatUpdatesScope
 
-    fun setHandlerForChat(chatId: Long?) {
-        chatIdForHandler = chatId
-    }
-
-    fun getMessagesForChat(chatId: Long, fromMessage: Long = 0) {
+    fun updateChatsFromNetworkForView(limit: Int = 15) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val response = TelegramRepository.getMessagesForChat(chatId, fromMessage)
-
-                _messagesFromChat.update { currentMessages ->
-                    if (fromMessage == 0L) {
-                        response.messages.toList()
-                    } else {
-                        // Добавляем только новые сообщения
-                        val existingIds = currentMessages.map { it.id }.toSet()
-                        val uniqueNewMessages = response.messages.filter { it.id !in existingIds }
-                        (currentMessages + uniqueNewMessages).distinctBy { it.id }
+                // Запускаем загрузку чатов
+                api.client?.send(TdApi.LoadChats(TdApi.ChatListMain(), limit)) { response ->
+                    when (response) {
+                        is TdApi.Ok -> Log.d("ChatUpdater", "Chats were loaded successfully")
+                        is TdApi.Error -> Log.e("ChatUpdater", "Failed to load chats: $response")
                     }
                 }
             } catch (e: Exception) {
-                println("Ошибка загрузки сообщений: ${e.message}")
+                println("Error loading chats: ${e.message}")
             }
         }
     }
 
+    private fun observeAllChatUpdates() {
+        chatUpdatesScope.launch {
+            launch {
+                repository.newChatFlowUpdate.collect { chat ->
+                    handleNewChatUpdate(chat)
+                }
+            }
+            launch {
+                repository.chatLastMessageUpdate.collect { update ->
+                    handleChatLastMessage(update)
+                }
+            }
+            launch {
+                repository.chatAddedToList.collect { update ->
+                    handleChatAddedToList(update)
+                }
+            }
+        }
+    }
 
-    private fun observeNewMessagesFromChat() {
-        viewModelScope.launch(Dispatchers.IO) {
-            TelegramRepository.getNewMessageFlow.collect { message ->
-                if (message.chatId == chatIdForHandler) {
-                    val currentMessages = _messagesFromChat.value
-                    if (currentMessages.none { it.id == message.id }) { // Проверяем, есть ли сообщение
-                        val newList = currentMessages.toMutableList().apply {
-                            add(0, message) // Добавляем новое сообщение в начало
-                        }
-                        _messagesFromChat.value = newList
-                        println("Добавлено новое сообщение, общее число: ${newList.size}")
-                    }
+    private suspend fun handleChatAddedToList(update: TdApi.UpdateChatAddedToList) {
+        val chatId = update.chatId
+        Log.d("ChatUpdater" , "$chatId")
+        handleChatUpdate(api.getChat(update.chatId))
+    }
+
+    private suspend fun handleChatLastMessage(update: TdApi.UpdateChatLastMessage) {
+        val chatId = update.chatId
+        Log.d("ChatUpdater" , "$chatId")
+        handleChatUpdate(api.getChat(update.chatId))
+    }
+
+    private fun handleNewChatUpdate(chat: TdApi.Chat) {
+        Log.d("ChatUpdater" , "${chat.id}")
+        handleChatUpdate(chat)
+    }
+
+    private fun observeChatUpdates() {
+        chatUpdatesScope.launch(Dispatchers.IO) {
+            TelegramRepository.messageFlow.collect { message ->
+                val chat = api.getChat(message.chatId)
+                handleChatUpdate(chat)
+
+                val messageFlow = mapOfMessages.getOrPut(message.chatId) {
+                    MutableStateFlow(mutableListOf())
+                }
+                messageFlow.update { currentList ->
+                    (mutableListOf(message) + currentList).toMutableList()
                 }
             }
         }
     }
 
 
+    private fun observeUnreadCount() {
+        viewModelScope.launch(Dispatchers.IO) {
+            TelegramRepository.chatReadInbox.collect { update ->
+                val chatId = update.chatId
+                val chat = api.getChat(chatId)
+                handleChatUpdate(chat)
+            }
+        }
+    }
 
-    suspend fun updateChatList(chatId: Long) {
-        val updatedChat = loadChatDetails(chatId)
-        _visibleChats.value = _visibleChats.value.map { if (it.id == chatId) updatedChat else it }.sortedWith(compareByDescending<TdApi.Chat> { chat ->
-            chat.positions?.firstOrNull()?.order ?: 0L // Проверяем positions на null
-        }.thenByDescending { chatFilter ->
-            chatFilter.id // Если order одинаковый, сортируем по id
-        })
+
+
+    private var _chatFolders = MutableStateFlow<List<TdApi.ChatListFolder>>(emptyList())
+    var chatFolders: StateFlow<List<TdApi.ChatListFolder>> = _chatFolders
+
+    private fun handleChatUpdate(chat: TdApi.Chat) {
+        synchronized(chatMap) {
+            chatMap[chat.id] = chat
+        }
+        updateVisibleChats()
+    }
+
+    private fun updateVisibleChats() {
+        viewModelScope.launch {
+            // Создаем новый список для безопасного обновления
+            val sortedChats = synchronized(chatMap) {
+                chatMap.values.sortedWith(
+                    compareByDescending<TdApi.Chat> { chat ->
+                        chat.positions?.firstOrNull()?.order ?: 0L
+                    }.thenByDescending { it.id }
+                )
+            }
+            _visibleChats.value = sortedChats
+        }
+    }
+
+    val mapOfMessages = ConcurrentHashMap<Long, MutableStateFlow<MutableList<TdApi.Message>>>()
+
+    fun getMessagesForChat(chatId: Long, fromMessage: Long = 0) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val newMessages = TelegramRepository.getMessagesForChat(chatId, fromMessage)
+
+            val messageFlow = mapOfMessages.getOrPut(chatId) {
+                MutableStateFlow(mutableListOf())
+            }
+
+            messageFlow.update { currentMessages ->
+                if (fromMessage == 0L) {
+                    // Если это первая загрузка, просто заменяем список
+                    newMessages.messages.toMutableList()
+                } else {
+                    // Добавляем только новые сообщения
+                    val existingIds = currentMessages.map { it.id }.toSet()
+                    val uniqueNewMessages = newMessages.messages.filter { it.id !in existingIds }
+                    (currentMessages + uniqueNewMessages).distinctBy { it.id }.toMutableList()
+                }
+            }
+        }
     }
 
     private val _avatarPaths = MutableStateFlow<Map<Long, String?>>(emptyMap())
-
     private val fileIdToChatId = mutableMapOf<Int, Long>()
 
     suspend fun getChatAvatarPath(chat: TdApi.Chat, size: String = "s"): String? {
