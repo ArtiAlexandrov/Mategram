@@ -1,32 +1,25 @@
 package com.xxcactussell.mategram.ui.chat
 
 import android.widget.Toast
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
@@ -62,6 +55,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -73,11 +69,11 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.xxcactussell.mategram.MainViewModel
 import com.xxcactussell.mategram.R
-import com.xxcactussell.mategram.TelegramRepository.api
-import com.xxcactussell.mategram.convertUnixTimestampToDate
-import com.xxcactussell.mategram.convertUnixTimestampToDateByDay
-import com.xxcactussell.mategram.formatFileSize
-import com.xxcactussell.mategram.getDayFromDate
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
+import com.xxcactussell.mategram.kotlinx.telegram.core.convertUnixTimestampToDate
+import com.xxcactussell.mategram.kotlinx.telegram.core.convertUnixTimestampToDateByDay
+import com.xxcactussell.mategram.kotlinx.telegram.core.formatFileSize
+import com.xxcactussell.mategram.kotlinx.telegram.core.getDayFromDate
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
 import kotlinx.coroutines.delay
@@ -89,7 +85,10 @@ import org.drinkless.tdlib.TdApi.MessageReplyToMessage
 import org.drinkless.tdlib.TdApi.MessageText
 import org.drinkless.tdlib.TdApi.MessageVideo
 import org.drinkless.tdlib.TdApi.Video
-
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -325,7 +324,7 @@ fun ChatDetailPane(
                                     LaunchedEffect(messagesForChat) {
                                         if (item.replyTo is MessageReplyToMessage) {
                                             messageToReply =
-                                                viewModel.getMessageById((item.replyTo as MessageReplyToMessage))
+                                                viewModel.getMessageById(item.replyTo)
                                         }
                                     }
                                     var replyTitle by remember { mutableStateOf("") }
@@ -437,8 +436,7 @@ fun ChatDetailPane(
                                                         )
                                                         Spacer(modifier = Modifier.width(4.dp))
                                                         Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageContact).contact.toString()
-                                                                ?: "Нет сообщений",
+                                                            text = (messageToReply!!.content as TdApi.MessageContact).contact.toString(),
                                                             style = MaterialTheme.typography.labelSmall,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
@@ -469,8 +467,7 @@ fun ChatDetailPane(
                                                         )
                                                         Spacer(modifier = Modifier.width(4.dp))
                                                         Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageGame).game.toString()
-                                                                ?: "Нет сообщений",
+                                                            text = (messageToReply!!.content as TdApi.MessageGame).game.toString(),
                                                             style = MaterialTheme.typography.labelSmall,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
@@ -485,8 +482,7 @@ fun ChatDetailPane(
                                                         )
                                                         Spacer(modifier = Modifier.width(4.dp))
                                                         Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageGiveaway).prize.toString()
-                                                                ?: "Нет сообщений",
+                                                            text = (messageToReply!!.content as TdApi.MessageGiveaway).prize.toString(),
                                                             style = MaterialTheme.typography.labelSmall,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
@@ -749,8 +745,7 @@ fun ChatDetailPane(
                                                         )
                                                         Spacer(modifier = Modifier.width(4.dp))
                                                         Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageContact).contact.toString()
-                                                                ?: "Нет сообщений",
+                                                            text = (messageToReply!!.content as TdApi.MessageContact).contact.toString(),
                                                             style = MaterialTheme.typography.labelSmall,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
@@ -781,8 +776,7 @@ fun ChatDetailPane(
                                                         )
                                                         Spacer(modifier = Modifier.width(4.dp))
                                                         Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageGame).game.toString()
-                                                                ?: "Нет сообщений",
+                                                            text = (messageToReply!!.content as TdApi.MessageGame).game.toString(),
                                                             style = MaterialTheme.typography.labelSmall,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
@@ -797,8 +791,7 @@ fun ChatDetailPane(
                                                         )
                                                         Spacer(modifier = Modifier.width(4.dp))
                                                         Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageGiveaway).prize.toString()
-                                                                ?: "Нет сообщений",
+                                                            text = (messageToReply!!.content as TdApi.MessageGiveaway).prize.toString(),
                                                             style = MaterialTheme.typography.labelSmall,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
@@ -909,18 +902,152 @@ fun ChatDetailPane(
                                     shape = RoundedCornerShape(24.dp),
                                     colors = CardDefaults.cardColors(
                                         containerColor = if (!item.isOutgoing)
-                                            MaterialTheme.colorScheme.primaryContainer
+                                            MaterialTheme.colorScheme.inversePrimary
                                         else
-                                            MaterialTheme.colorScheme.surfaceContainer
+                                            MaterialTheme.colorScheme.surfaceVariant
                                     ),
                                 ) {
+
                                     if (item.content is MessageText) {
+                                        val formattedText = (item.content as MessageText).text
+                                        var revealedSpoilers by remember {
+                                            mutableStateOf(emptySet<IntRange>())
+                                        }
                                         Text(
-                                            modifier = Modifier.padding(16.dp),
-                                            text = (item.content as MessageText).text.text,
+                                            modifier = Modifier
+                                                .padding(16.dp),
+                                            text = buildAnnotatedString {
+                                                formattedText.entities.forEach { entity ->
+                                                    val start = entity.offset
+                                                    val end = entity.offset + entity.length
+                                                    val range = start until end
+                                                    when (entity.type) {
+                                                        is TdApi.TextEntityTypeTextUrl -> {
+                                                            addStyle(
+                                                                SpanStyle(
+                                                                    color = MaterialTheme.colorScheme.primary
+                                                                ),
+                                                                start, end
+                                                            )
+                                                            addLink(
+                                                                url = LinkAnnotation.Url((entity.type as TdApi.TextEntityTypeTextUrl).url),
+                                                                start = start,
+                                                                end = end
+                                                            )
+                                                        }
+                                                        is TdApi.TextEntityTypeUrl -> {
+                                                            val url = formattedText.text.substring(start, end)
+                                                            addStyle(
+                                                                SpanStyle(
+                                                                    color = MaterialTheme.colorScheme.primary,
+                                                                    textDecoration = TextDecoration.Underline
+                                                                ),
+                                                                start, end
+                                                            )
+                                                            addLink(
+                                                                url = LinkAnnotation.Url(url),
+                                                                start = start,
+                                                                end = end
+                                                            )
+                                                        }
+                                                        is TdApi.TextEntityTypeSpoiler -> {
+                                                            if (range in revealedSpoilers) {
+                                                                addStyle(
+                                                                    SpanStyle(
+                                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                                        background = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                                                    ),
+                                                                    start, end
+                                                                )
+                                                            } else {
+                                                                addStyle(
+                                                                    SpanStyle(
+                                                                        background = MaterialTheme.colorScheme.onSurface,
+                                                                        color = MaterialTheme.colorScheme.onSurface
+                                                                    ),
+                                                                    start, end
+                                                                )
+                                                            }
+                                                        }
+                                                        is TdApi.TextEntityTypeBold -> {
+                                                            addStyle(
+                                                                SpanStyle(fontWeight = FontWeight.Bold),
+                                                                start, end
+                                                            )
+                                                        }
+                                                        is TdApi.TextEntityTypeItalic -> {
+                                                            addStyle(
+                                                                SpanStyle(fontStyle = FontStyle.Italic),
+                                                                start, end
+                                                            )
+                                                        }
+                                                        is TdApi.TextEntityTypeCode -> {
+                                                            addStyle(
+                                                                SpanStyle(
+                                                                    fontFamily = FontFamily.Monospace,
+                                                                ),
+                                                                start, end
+                                                            )
+                                                        }
+                                                        is TdApi.TextEntityTypePreCode -> {
+                                                            addStyle(
+                                                                SpanStyle(
+                                                                    fontFamily = FontFamily.Monospace
+                                                                ),
+                                                                start, end
+                                                            )
+                                                        }
+                                                        is TdApi.TextEntityTypeMention -> {
+                                                            addStyle(
+                                                                SpanStyle(color = MaterialTheme.colorScheme.primary),
+                                                                start, end
+                                                            )
+                                                        }
+                                                        is TdApi.TextEntityTypeHashtag -> {
+                                                            addStyle(
+                                                                SpanStyle(color = MaterialTheme.colorScheme.primary),
+                                                                start, end
+                                                            )
+                                                        }
+                                                        is TdApi.TextEntityTypeUnderline -> {
+                                                            addStyle(
+                                                                SpanStyle(textDecoration = TextDecoration.Underline),
+                                                                start, end
+                                                            )
+                                                        }
+                                                        is TdApi.TextEntityTypeStrikethrough -> {
+                                                            addStyle(
+                                                                SpanStyle(textDecoration = TextDecoration.LineThrough),
+                                                                start, end
+                                                            )
+                                                        }
+                                                        is TdApi.TextEntityTypeBlockQuote -> {
+                                                            addStyle(
+                                                                SpanStyle(
+                                                                    fontStyle = FontStyle.Italic
+                                                                ),
+                                                                start, end
+                                                            )
+                                                        }
+                                                        is TdApi.TextEntityTypePre -> {
+                                                            addStyle(
+                                                                SpanStyle(
+                                                                    fontFamily = FontFamily.Monospace
+                                                                ),
+                                                                start, end
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                                append(formattedText.text)
+                                            },
                                             style = MaterialTheme.typography.bodyMedium
                                         )
-                                    } else if (item.content is TdApi.MessageSticker) {
+
+                                    }
+
+
+                                    else if (item.content is TdApi.MessageSticker) {
                                         val sticker =
                                             (item.content as TdApi.MessageSticker).sticker
                                         val stickerFile = sticker?.sticker
@@ -981,10 +1108,10 @@ fun ChatDetailPane(
                                                 )
                                             }
                                         }
-                                    } else if (item.content is TdApi.MessagePhoto) {
+                                    } else if (item.content is MessagePhoto) {
                                         // Получаем нужный PhotoSize с type = "x"
                                         val photoSize =
-                                            (item.content as TdApi.MessagePhoto)
+                                            (item.content as MessagePhoto)
                                                 .photo?.sizes?.find { it.type == "x" }
 
                                         // Запускаем загрузку фото и храним результат в `imagePath`
@@ -1024,9 +1151,9 @@ fun ChatDetailPane(
                                                     .clip(RoundedCornerShape(24.dp))
                                             )
                                         }
-                                    } else if (item.content is TdApi.MessageVideo) {
+                                    } else if (item.content is MessageVideo) {
                                         val videoContent =
-                                            (item.content as TdApi.MessageVideo).video
+                                            (item.content as MessageVideo).video
                                         val thumbnailFile = (videoContent as Video).thumbnail?.file
                                         var thumbnailPath by remember { mutableStateOf<String?>(null) }
 
@@ -1036,7 +1163,7 @@ fun ChatDetailPane(
                                         }
 
                                         val caption =
-                                            (item.content as TdApi.MessageVideo).caption.text
+                                            (item.content as MessageVideo).caption.text
 
                                         if (caption.isNotEmpty()) {
                                             Column {
@@ -1404,8 +1531,7 @@ private fun groupMessagesByAlbum(messages: List<TdApi.Message>): List<Any> {
 }
 
 // Создадим класс для хранения альбома
-data class MediaAlbum(val messages: List<TdApi.Message>, val isOutgoing: Boolean, val replyTo: TdApi.MessageReplyTo?, val date: Int) {
-}
+data class MediaAlbum(val messages: List<TdApi.Message>, val isOutgoing: Boolean, val replyTo: TdApi.MessageReplyTo?, val date: Int)
 
 // Создадим Composable для отображения карусели
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1430,14 +1556,14 @@ fun MediaCarousel(
         ) { index ->
             val message = album.messages[index]
             when (message.content) {
-                is TdApi.MessagePhoto -> {
+                is MessagePhoto -> {
                     Box(
                         modifier = Modifier.maskClip(MaterialTheme.shapes.medium)
                     ) {
                         PhotoContent(message = message, viewModel = viewModel)
                     }
                 }
-                is TdApi.MessageVideo -> {
+                is MessageVideo -> {
                     Box(
                         modifier = Modifier.maskClip(MaterialTheme.shapes.medium)
                     ) {
@@ -1450,8 +1576,8 @@ fun MediaCarousel(
         // Caption and page indicators
         val firstMessageCaption = album.messages.firstNotNullOfOrNull { message ->
             when (val content = message.content) {
-                is TdApi.MessagePhoto -> content.caption.text.takeIf { !it.isNullOrEmpty() }
-                is TdApi.MessageVideo -> content.caption.text.takeIf { !it.isNullOrEmpty() }
+                is MessagePhoto -> content.caption.text.takeIf { !it.isNullOrEmpty() }
+                is MessageVideo -> content.caption.text.takeIf { !it.isNullOrEmpty() }
                 else -> null
             }
         }
@@ -1475,7 +1601,7 @@ fun PhotoContent(
     viewModel: MainViewModel,
     modifier: Modifier = Modifier
 ) {
-    val photoSize = (message.content as TdApi.MessagePhoto).photo?.sizes?.find { it.type == "x" }
+    val photoSize = (message.content as MessagePhoto).photo?.sizes?.find { it.type == "x" }
     var imagePath by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(photoSize) {
@@ -1497,8 +1623,8 @@ fun VideoContent(
     viewModel: MainViewModel,
     modifier: Modifier = Modifier
 ) {
-    val videoContent = (message.content as TdApi.MessageVideo).video
-    val thumbnailFile = (videoContent as TdApi.Video).thumbnail?.file
+    val videoContent = (message.content as MessageVideo).video
+    val thumbnailFile = (videoContent as Video).thumbnail?.file
     var thumbnailPath by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(thumbnailFile) {

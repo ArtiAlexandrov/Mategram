@@ -15,11 +15,12 @@ import android.webkit.MimeTypeMap
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.xxcactussell.mategram.TelegramRepository.api
-import com.xxcactussell.mategram.TelegramRepository.loadChatDetails
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.loadChatDetails
 import com.xxcactussell.mategram.domain.entity.AuthState
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramCredentials
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatFolder
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMe
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
@@ -31,12 +32,11 @@ import com.xxcactussell.mategram.kotlinx.telegram.coroutines.viewMessages
 import com.xxcactussell.mategram.kotlinx.telegram.flows.authorizationStateFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.notificationFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.notificationGroupFlow
-import com.xxcactussell.mategram.ui.FcmManager
-import com.xxcactussell.mategram.ui.NotificationHelper
-import kotlinx.coroutines.CoroutineScope
+import com.xxcactussell.mategram.notifications.FcmManager
+import com.xxcactussell.mategram.notifications.NotificationHelper
+import com.xxcactussell.mategram.notifications.NotificationSettingsManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -54,8 +54,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.drinkless.tdlib.TdApi
 import org.drinkless.tdlib.TdApi.Chat
-import org.drinkless.tdlib.TdApi.Chats
-import org.drinkless.tdlib.TdApi.GetChats
 import java.io.FileInputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -243,9 +241,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
 
 
-    private val _visibleChats = MutableStateFlow<List<TdApi.Chat>>(emptyList())
+    private val _visibleChats = MutableStateFlow<List<Chat>>(emptyList())
     val visibleChats = _visibleChats.asStateFlow()
-    private val chatMap = mutableMapOf<Long, TdApi.Chat>()
+    private val chatMap = mutableMapOf<Long, Chat>()
 
     private val chatUpdatesScope = TelegramRepository.chatUpdatesScope
 
@@ -287,28 +285,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     handleChatDraft(update)
                 }
             }
+            launch {
+                repository.chatPositionUpdate.collect { update ->
+                    handleChatPosition(update)
+                }
+            }
         }
+    }
+
+    private suspend fun handleChatPosition(update: TdApi.UpdateChatPosition) {
+        val chatId = update.chatId
+        Log.d("ChatUpdater" , "$chatId")
+        handleChatUpdate(api.getChat(chatId))
     }
 
     private suspend fun handleChatDraft(update: TdApi.UpdateChatDraftMessage) {
         val chatId = update.chatId
         Log.d("ChatUpdater" , "$chatId")
-        handleChatUpdate(api.getChat(update.chatId))
+        handleChatUpdate(api.getChat(chatId))
     }
 
     private suspend fun handleChatAddedToList(update: TdApi.UpdateChatAddedToList) {
         val chatId = update.chatId
         Log.d("ChatUpdater" , "$chatId")
-        handleChatUpdate(api.getChat(update.chatId))
+        handleChatUpdate(api.getChat(chatId))
     }
 
     private suspend fun handleChatLastMessage(update: TdApi.UpdateChatLastMessage) {
         val chatId = update.chatId
         Log.d("ChatUpdater" , "$chatId")
-        handleChatUpdate(api.getChat(update.chatId))
+        handleChatUpdate(api.getChat(chatId))
     }
 
-    private fun handleNewChatUpdate(chat: TdApi.Chat) {
+    private fun handleNewChatUpdate(chat: Chat) {
         Log.d("ChatUpdater" , "${chat.id}")
         handleChatUpdate(chat)
     }
@@ -345,7 +354,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var _chatFolders = MutableStateFlow<List<TdApi.ChatListFolder>>(emptyList())
     var chatFolders: StateFlow<List<TdApi.ChatListFolder>> = _chatFolders
 
-    private fun handleChatUpdate(chat: TdApi.Chat) {
+    private fun handleChatUpdate(chat: Chat) {
         synchronized(chatMap) {
             chatMap[chat.id] = chat
         }
@@ -357,7 +366,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // Создаем новый список для безопасного обновления
             val sortedChats = synchronized(chatMap) {
                 chatMap.values.sortedWith(
-                    compareByDescending<TdApi.Chat> { chat ->
+                    compareByDescending<Chat> { chat ->
                         chat.positions?.firstOrNull()?.order ?: 0L
                     }.thenByDescending { it.id }
                 )
@@ -393,7 +402,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _avatarPaths = MutableStateFlow<Map<Long, String?>>(emptyMap())
     private val fileIdToChatId = mutableMapOf<Int, Long>()
 
-    suspend fun getChatAvatarPath(chat: TdApi.Chat, size: String = "s"): String? {
+    suspend fun getChatAvatarPath(chat: Chat, size: String = "s"): String? {
         var avatarFileId: Int? = null
         if (size == "s") {
             avatarFileId = chat.photo?.small?.id
@@ -614,7 +623,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         api.viewMessages(message.chatId, longArrayOf(message.id), null, true)
     }
 
-    suspend fun getMessageById(replyMessage: TdApi.MessageReplyToMessage): TdApi.Message? {
+    suspend fun getMessageById(replyMessage: TdApi.MessageReplyToMessage): TdApi.Message {
         return api.getMessage(replyMessage.chatId, replyMessage.messageId)
     }
 
@@ -653,7 +662,7 @@ fun getMimeType(fileName: String): String {
 
 class NotificationViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val NotificationHelper = com.xxcactussell.mategram.ui.NotificationHelper
+    private val NotificationHelper = com.xxcactussell.mategram.notifications.NotificationHelper
 
     private var notificationJob: Job? = null
     private val jobLock = AtomicBoolean(false)
@@ -796,7 +805,7 @@ class NotificationViewModel(application: Application) : AndroidViewModel(applica
 
                     if (!message.isOutgoing) {
                         val messageInfo =
-                            com.xxcactussell.mategram.ui.NotificationHelper.MessageInfo(
+                            com.xxcactussell.mategram.notifications.NotificationHelper.MessageInfo(
                                 text = when (message.content) {
                                     is TdApi.MessageText -> (message.content as TdApi.MessageText).text.text
                                     is TdApi.MessagePhoto -> "📷 ${(message.content as TdApi.MessagePhoto).caption.text}"

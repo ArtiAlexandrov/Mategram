@@ -1,9 +1,6 @@
 package com.xxcactussell.mategram.kotlinx.telegram.core
 
 import android.util.Log
-import com.google.firebase.iid.FirebaseInstanceIdReceiver
-import com.google.firebase.iid.internal.FirebaseInstanceIdInternal
-import com.xxcactussell.mategram.TelegramRepository.api
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import org.drinkless.tdlib.Client

@@ -18,7 +18,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Mategram">
         <service
-            android:name=".ui.FcmService"
+            android:name=".notifications.FcmService"
             android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />

@@ -1,4 +1,4 @@
-package com.xxcactussell.mategram.ui
+package com.xxcactussell.mategram.ui.chat
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column

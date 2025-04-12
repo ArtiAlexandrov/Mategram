@@ -1,4 +1,4 @@
-package com.xxcactussell.mategram.ui
+package com.xxcactussell.mategram.notifications
 
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -14,14 +14,13 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.xxcactussell.mategram.MainActivity
 import com.xxcactussell.mategram.R
-import com.xxcactussell.mategram.TelegramRepository.api
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.downloadFile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
-import org.drinkless.tdlib.TdApi.Notification
 
 object NotificationHelper {
     private const val CHANNEL_ID = "telegram_messages"

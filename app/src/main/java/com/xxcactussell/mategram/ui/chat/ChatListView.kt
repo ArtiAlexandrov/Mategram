@@ -1,9 +1,6 @@
-package com.xxcactussell.mategram.ui
+package com.xxcactussell.mategram.ui.chat
 
-import android.util.Log
-import android.widget.Toast
 import androidx.activity.compose.LocalActivity
-import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -20,18 +17,15 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Badge
@@ -42,38 +36,31 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.VerticalDragHandle
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
-import androidx.compose.material3.adaptive.layout.AdaptStrategy
 import androidx.compose.material3.adaptive.layout.AnimatedPane
-import androidx.compose.material3.adaptive.layout.HingePolicy
-import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffoldDefaults
 import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldRole
 import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
 import androidx.compose.material3.adaptive.layout.defaultDragHandleSemantics
 import androidx.compose.material3.adaptive.layout.rememberPaneExpansionState
 import androidx.compose.material3.adaptive.navigation.NavigableListDetailPaneScaffold
 import androidx.compose.material3.adaptive.navigation.rememberListDetailPaneScaffoldNavigator
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberTopAppBarState
-import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
-import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
-import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -82,55 +69,38 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
-import androidx.navigation.NavController
 import coil.compose.AsyncImage
+import com.xxcactussell.mategram.MainActivity
 import com.xxcactussell.mategram.MainViewModel
 import com.xxcactussell.mategram.R
-import com.xxcactussell.mategram.TelegramRepository.api
-import com.xxcactussell.mategram.convertUnixTimestampToDate
-import com.xxcactussell.mategram.formatFileSize
-import com.xxcactussell.mategram.isUserContact
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
+import com.xxcactussell.mategram.kotlinx.telegram.core.converUnixTimeStampForChatList
+import com.xxcactussell.mategram.kotlinx.telegram.core.isUserContact
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.closeChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.createPrivateChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatFolder
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
-import com.xxcactussell.mategram.ui.chat.ChatDetailPane
-import com.xxcactussell.mategram.ui.chat.ChatInfoPane
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.openChat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 import org.drinkless.tdlib.TdApi.MessagePhoto
-import org.drinkless.tdlib.TdApi.MessageReplyToMessage
 import org.drinkless.tdlib.TdApi.MessageText
 import org.drinkless.tdlib.TdApi.MessageVideo
-import org.drinkless.tdlib.TdApi.Video
-import androidx.compose.material3.LocalMinimumInteractiveComponentSize
-import androidx.compose.material3.VerticalDragHandle
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import com.xxcactussell.mategram.MainActivity
-import com.xxcactussell.mategram.converUnixTimeStampForChatList
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.closeChat
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatFolder
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.openChat
 
-@OptIn(ExperimentalMaterial3WindowSizeClassApi::class, ExperimentalMaterial3AdaptiveApi::class,
+@OptIn(
+    ExperimentalMaterial3AdaptiveApi::class,
     ExperimentalMaterial3Api::class
 )
 @Composable
@@ -474,19 +444,6 @@ fun ChatListView(
         }
     )
 
-    LaunchedEffect(activity) {
-        val chatIdFromIntent = activity?.getLongExtra("chat_id", 0L)
-        if (chatIdFromIntent != 0L) {
-            // Clear the intent to prevent reopening
-            activity?.removeExtra("chat_id")
-
-            Log.d("NAVIGATION", "Navigating to chat with ID: $chatIdFromIntent")
-            scope.launch {
-                navigator.navigateTo(ThreePaneScaffoldRole.Primary, chatIdFromIntent)
-            }
-        }
-    }
-
     LaunchedEffect(Unit) {
         viewModel.navigationEvent.collect { chatId ->
             navigator.navigateTo(ThreePaneScaffoldRole.Primary, chatId)
@@ -648,8 +605,7 @@ private fun ChatItem(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = (chat.lastMessage?.content as TdApi.MessageContact).contact.toString()
-                                ?: "Нет сообщений",
+                            text = (chat.lastMessage?.content as TdApi.MessageContact).contact.toString(),
                             style = MaterialTheme.typography.bodyMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -680,8 +636,7 @@ private fun ChatItem(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = (chat.lastMessage?.content as TdApi.MessageGame).game.toString()
-                                ?: "Нет сообщений",
+                            text = (chat.lastMessage?.content as TdApi.MessageGame).game.toString(),
                             style = MaterialTheme.typography.bodyMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -696,8 +651,7 @@ private fun ChatItem(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = (chat.lastMessage?.content as TdApi.MessageGiveaway).prize.toString()
-                                ?: "Нет сообщений",
+                            text = (chat.lastMessage?.content as TdApi.MessageGiveaway).prize.toString(),
                             style = MaterialTheme.typography.bodyMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis

@@ -1,62 +1,36 @@
-package com.xxcactussell.mategram
+package com.xxcactussell.mategram.kotlinx.telegram.core
 
 import android.annotation.SuppressLint
 import android.content.Context
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.firebase.messaging.FirebaseMessaging
-import com.xxcactussell.mategram.TelegramRepository.api
-import com.xxcactussell.mategram.domain.entity.AuthState
-import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramFlow
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.checkAuthenticationCode
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.checkAuthenticationPassword
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getAuthorizationState
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatFolder
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatHistory
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChats
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getFile
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMe
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessages
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getRecommendedChats
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.logOut
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.registerDevice
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.setAuthenticationPhoneNumber
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.setTdlibParameters
-import com.xxcactussell.mategram.kotlinx.telegram.flows.authorizationStateFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.newMessageFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.launch
 import kotlinx.telegram.extensions.ChatKtx
 import com.xxcactussell.mategram.kotlinx.telegram.extensions.UserKtx
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatAddedToListFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatDraftMessageFlow
-import com.xxcactussell.mategram.kotlinx.telegram.flows.chatFoldersFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatLastMessageFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatPositionFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatReadInboxFlow
-import com.xxcactussell.mategram.kotlinx.telegram.flows.chatTitleFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.newChatFlow
-import com.xxcactussell.mategram.kotlinx.telegram.flows.notificationGroupFlow
-import com.xxcactussell.mategram.kotlinx.telegram.flows.supergroupFlow
-import com.xxcactussell.mategram.kotlinx.telegram.flows.supergroupFullInfoFlow
-import com.xxcactussell.mategram.kotlinx.telegram.flows.unreadChatCountFlow
-import com.xxcactussell.mategram.kotlinx.telegram.flows.unreadMessageCountFlow
-import com.xxcactussell.mategram.kotlinx.telegram.flows.userFlow
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.withContext
 import kotlinx.telegram.flows.fileFlow
 import org.drinkless.tdlib.TdApi
 import org.drinkless.tdlib.TdApi.Message
@@ -152,6 +126,12 @@ object TelegramRepository : UserKtx, ChatKtx {
 
 
     // Собираем события для loadchats
+
+    val chatPositionUpdate: Flow<TdApi.UpdateChatPosition> = api.chatPositionFlow().shareIn(
+        scope = chatUpdatesScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        replay = 5
+    )
 
     val newChatFlowUpdate: Flow<TdApi.Chat> = api.newChatFlow().shareIn(
         scope = chatUpdatesScope,

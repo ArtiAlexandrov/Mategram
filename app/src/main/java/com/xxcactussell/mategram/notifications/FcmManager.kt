@@ -1,14 +1,12 @@
-package com.xxcactussell.mategram.ui
+package com.xxcactussell.mategram.notifications
 
 import android.content.Context
 import android.util.Log
 import com.google.firebase.messaging.FirebaseMessaging
-import com.xxcactussell.mategram.TelegramRepository.api
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
-import org.drinkless.tdlib.TdApi
 
 class FcmManager(private val context: Context) {
     private val prefs = context.getSharedPreferences("fcm_prefs", Context.MODE_PRIVATE)

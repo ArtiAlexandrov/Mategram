@@ -1,17 +1,13 @@
-package com.xxcactussell.mategram.ui
+package com.xxcactussell.mategram.notifications
 
 import android.util.Log
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.google.gson.Gson
-import com.xxcactussell.mategram.MainViewModel
 import com.xxcactussell.mategram.NotificationViewModel
-import com.xxcactussell.mategram.TelegramCredentials
-import com.xxcactussell.mategram.TelegramRepository
-import com.xxcactussell.mategram.TelegramRepository.api
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramCredentials
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getAuthorizationState
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.setTdlibParameters
 import kotlinx.coroutines.CoroutineScope

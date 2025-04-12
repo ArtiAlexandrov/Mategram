@@ -1,4 +1,4 @@
-package com.xxcactussell.mategram
+package com.xxcactussell.mategram.notifications
 
 import android.content.Context
 

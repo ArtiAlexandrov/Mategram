@@ -25,7 +25,7 @@ fun TelegramFlow.scopeNotificationSettingsFlow(): Flow<UpdateScopeNotificationSe
  * were updated.
  */
 fun TelegramFlow.reactionNotificationSettingsFlow(): Flow<ReactionNotificationSettings> =
-    this.getUpdatesFlowOfType<TdApi.UpdateReactionNotificationSettings>()
+    this.getUpdatesFlowOfType<UpdateReactionNotificationSettings>()
     .mapNotNull { it.notificationSettings }
 
 /**
@@ -46,7 +46,7 @@ fun TelegramFlow.notificationGroupFlow(): Flow<UpdateNotificationGroup> =
  * comes once before any updateNotification and updateNotificationGroup update.
  */
 fun TelegramFlow.activeNotificationsFlow(): Flow<Array<NotificationGroup>> =
-    this.getUpdatesFlowOfType<TdApi.UpdateActiveNotifications>()
+    this.getUpdatesFlowOfType<UpdateActiveNotifications>()
     .mapNotNull { it.groups }
 
 /**
@@ -70,7 +70,7 @@ fun TelegramFlow.serviceNotificationFlow(): Flow<UpdateServiceNotification> =
  * time.
  */
 fun TelegramFlow.savedNotificationSoundsFlow(): Flow<LongArray> =
-    this.getUpdatesFlowOfType<TdApi.UpdateSavedNotificationSounds>()
+    this.getUpdatesFlowOfType<UpdateSavedNotificationSounds>()
     .mapNotNull { it.notificationSoundIds }
 
 /**
@@ -81,5 +81,5 @@ fun TelegramFlow.savedNotificationSoundsFlow(): Flow<LongArray> =
  * get expected speedup after subscription to Telegram Premium.
  */
 fun TelegramFlow.speedLimitNotificationFlow(): Flow<Boolean> =
-    this.getUpdatesFlowOfType<TdApi.UpdateSpeedLimitNotification>()
+    this.getUpdatesFlowOfType<UpdateSpeedLimitNotification>()
     .mapNotNull { it.isUpload }

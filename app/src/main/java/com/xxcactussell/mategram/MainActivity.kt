@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -25,26 +24,28 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.firebase.FirebaseApp
-import com.xxcactussell.mategram.TelegramRepository.api
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
 import com.xxcactussell.mategram.domain.entity.AuthState
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getAuthorizationState
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.setOption
-import com.xxcactussell.mategram.ui.ChatListView
-import com.xxcactussell.mategram.ui.FcmManager
-import com.xxcactussell.mategram.ui.Login2FAView
-import com.xxcactussell.mategram.ui.LoginCodeView
-import com.xxcactussell.mategram.ui.LoginPhoneView
-import com.xxcactussell.mategram.ui.LoginView
+import com.xxcactussell.mategram.ui.chat.ChatListView
+import com.xxcactussell.mategram.notifications.FcmManager
+import com.xxcactussell.mategram.ui.loginView.Login2FAView
+import com.xxcactussell.mategram.ui.loginView.LoginCodeView
+import com.xxcactussell.mategram.ui.loginView.LoginPhoneView
+import com.xxcactussell.mategram.ui.loginView.LoginView
 import com.xxcactussell.mategram.ui.theme.MategramTheme
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 
 
@@ -135,8 +136,12 @@ class MainActivity : ComponentActivity() {
             val chatId = intent.getLongExtra("chat_id", 0L)
             if (chatId != 0L) {
                 pendingChatId = chatId
-                // If already authorized, open chat immediately
-                if (viewModel.authState.value == AuthState.Ready) {
+                viewModel.viewModelScope.launch {
+                    while (
+                        viewModel.authState.value != AuthState.Ready
+                    ) {
+                        delay(100)
+                    }
                     viewModel.openChat(chatId)
                 }
             }
