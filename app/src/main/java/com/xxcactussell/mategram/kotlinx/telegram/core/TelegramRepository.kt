@@ -109,8 +109,6 @@ object TelegramRepository : UserKtx, ChatKtx {
         return api.getChat(chatId)
     }
 
-    val downloadedFileFlow: Flow<TdApi.File> = api.fileFlow()
-
     suspend fun getFile(fileId: Int): TdApi.File {
         return api.getFile(fileId)
     }
@@ -156,6 +154,12 @@ object TelegramRepository : UserKtx, ChatKtx {
     )
 
     val chatDraftUpdate: Flow<TdApi.UpdateChatDraftMessage> = api.chatDraftMessageFlow().shareIn(
+        scope = chatUpdatesScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        replay = 5
+    )
+
+    val fileUpdateFLow: Flow<TdApi.UpdateFile> = api.fileFlow().shareIn(
         scope = chatUpdatesScope,
         started = SharingStarted.WhileSubscribed(5000),
         replay = 5

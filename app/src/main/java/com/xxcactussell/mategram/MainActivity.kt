@@ -1,6 +1,8 @@
 package com.xxcactussell.mategram
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
@@ -9,6 +11,9 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
 import android.util.Log
+import android.view.View
+import android.view.Window
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -19,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -28,6 +34,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewModelScope
@@ -114,11 +121,12 @@ class MainActivity : ComponentActivity() {
                     AuthState.Ready -> {
                         viewModel.setOnline(true)
                         ChatListView(
-                            viewModel = viewModel
+                            viewModel = viewModel,
+                            window = window
                         )
                     }
                     else -> {
-                        AuthStateContent(authState, viewModel)
+                        AuthStateContent(authState, viewModel, window = window)
                     }
                 }
             }
@@ -191,7 +199,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AuthStateContent(
     authState: AuthState,
-    viewModel: MainViewModel
+    viewModel: MainViewModel,
+    window: Window
 ) {
     var isOvercome by rememberSaveable { mutableStateOf(false) }
 
@@ -212,7 +221,7 @@ private fun AuthStateContent(
         }
         AuthState.Ready -> {
             TdApi.SetOption("online", TdApi.OptionValueBoolean(true))
-            ChatListView()
+            ChatListView(window = window)
         }
     }
 }

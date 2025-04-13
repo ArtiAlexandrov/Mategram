@@ -1,5 +1,6 @@
 package com.xxcactussell.mategram.ui.chat
 
+import android.view.Window
 import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
@@ -52,6 +53,7 @@ import androidx.compose.material3.VerticalDragHandle
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.adaptive.layout.AnimatedPane
+import androidx.compose.material3.adaptive.layout.ListDetailPaneScaffoldRole
 import androidx.compose.material3.adaptive.layout.ThreePaneScaffoldRole
 import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
 import androidx.compose.material3.adaptive.layout.defaultDragHandleSemantics
@@ -75,7 +77,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -105,7 +111,8 @@ import org.drinkless.tdlib.TdApi.MessageVideo
 )
 @Composable
 fun ChatListView(
-    viewModel: MainViewModel = viewModel()
+    viewModel: MainViewModel = viewModel(),
+    window: Window
 ) {
     val me by viewModel.me.collectAsState()
     var avatarMePath by remember { mutableStateOf<String?>("") }
@@ -356,7 +363,7 @@ fun ChatListView(
                                         onChatClick = {
                                             scope.launch {
                                                 navigator.navigateTo(
-                                                    ThreePaneScaffoldRole.Primary,
+                                                    ListDetailPaneScaffoldRole.Detail,
                                                     chat.id
                                                 )
                                             }
@@ -376,7 +383,7 @@ fun ChatListView(
                                         onChatClick = {
                                             scope.launch {
                                                 navigator.navigateTo(
-                                                    ThreePaneScaffoldRole.Primary,
+                                                    ListDetailPaneScaffoldRole.Detail,
                                                     chat.id
                                                 )
                                             }
@@ -419,7 +426,13 @@ fun ChatListView(
                         onShowInfo = {
                             selectedChatForInfoPane = selectedChat
                             showBottomSheet = true
-                        }
+                        },
+                        window = window,
+                        onImageClick = { message ->
+                            scope.launch {
+                                navigator.navigateTo(ListDetailPaneScaffoldRole.Extra, message.id)
+                            }
+                        },
                     )
                 }
             }
@@ -534,208 +547,39 @@ private fun ChatItem(
                         }
                     }
                 }
-                Row {
+                Row (verticalAlignment = Alignment.CenterVertically) {
+                    var messageContent by remember { mutableStateOf<MessageContent?>(null) }
+                    LaunchedEffect(Unit) {
+                        messageContent = getMessageContent(chat.id, chat.lastMessage?.id ?: 0L, viewModel)
+                    }
                     if (chat.lastMessage?.isOutgoing == true) {
-                        Text(text = "Вы:", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = buildAnnotatedString {
+                                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                                    append("Вы:")
+                                }
+                            },
+                            style = MaterialTheme.typography.bodyMedium
+                        )
                         Spacer(modifier = Modifier.width(4.dp))
                     }
-                    if (chat.lastMessage?.content is MessagePhoto) {
-                        Icon(
-                            painterResource(R.drawable.baseline_image_24),
-                            "photo",
-                            Modifier
-                                .size(16.dp)
-                                .align(Alignment.CenterVertically)
+                    messageContent?.thumbnail?.let {
+                        ByteArrayImage(
+                            imageData = it,
+                            contentDescription = "Медиа в ответе",
+                            modifier = Modifier.size(16.dp).clip(RoundedCornerShape(4.dp)),
                         )
                         Spacer(modifier = Modifier.width(4.dp))
+                    }
+                    messageContent?.textForReply?.let {
                         Text(
-                            text = (chat.lastMessage?.content as MessagePhoto).caption.text
-                                ?: "Нет сообщения",
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    } else if (chat.lastMessage?.content is MessageVideo) {
-                        Icon(
-                            painterResource(R.drawable.baseline_video_file_24),
-                            "photo",
-                            Modifier
-                                .size(16.dp)
-                                .align(Alignment.CenterVertically)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = (chat.lastMessage?.content as MessageVideo).caption.text
-                                ?: "Нет сообщения",
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    } else if (chat.lastMessage?.content is MessageText) {
-                        Text(
-                            text = (chat.lastMessage?.content as MessageText).text.text
-                                ?: "Нет сообщений",
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    } else if (chat.lastMessage?.content is TdApi.MessageAudio) {
-                        Icon(
-                            painterResource(R.drawable.baseline_audio_file_24),
-                            "photo",
-                            Modifier
-                                .size(16.dp)
-                                .align(Alignment.CenterVertically)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = (chat.lastMessage?.content as TdApi.MessageAudio).caption.text
-                                ?: "Нет сообщений",
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    } else if (chat.lastMessage?.content is TdApi.MessageContact) {
-                        Icon(
-                            painterResource(R.drawable.baseline_perm_contact_calendar_24),
-                            "photo",
-                            Modifier
-                                .size(16.dp)
-                                .align(Alignment.CenterVertically)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = (chat.lastMessage?.content as TdApi.MessageContact).contact.toString(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    } else if (chat.lastMessage?.content is TdApi.MessageDocument) {
-                        Icon(
-                            painterResource(R.drawable.baseline_edit_document_24),
-                            "photo",
-                            Modifier
-                                .size(16.dp)
-                                .align(Alignment.CenterVertically)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = (chat.lastMessage?.content as TdApi.MessageDocument).caption.text
-                                ?: "Нет сообщений",
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    } else if (chat.lastMessage?.content is TdApi.MessageGame) {
-                        Icon(
-                            painterResource(R.drawable.baseline_videogame_asset_24),
-                            "photo",
-                            Modifier
-                                .size(16.dp)
-                                .align(Alignment.CenterVertically)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = (chat.lastMessage?.content as TdApi.MessageGame).game.toString(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    } else if (chat.lastMessage?.content is TdApi.MessageGiveaway) {
-                        Icon(
-                            painterResource(R.drawable.baseline_emoji_events_24),
-                            "photo",
-                            Modifier
-                                .size(16.dp)
-                                .align(Alignment.CenterVertically)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = (chat.lastMessage?.content as TdApi.MessageGiveaway).prize.toString(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    } else if (chat.lastMessage?.content is TdApi.MessagePoll) {
-                        Icon(
-                            painterResource(R.drawable.baseline_poll_24),
-                            "photo",
-                            Modifier
-                                .size(16.dp)
-                                .align(Alignment.CenterVertically)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = (chat.lastMessage?.content as TdApi.MessagePoll).poll.question.text
-                                ?: "Нет сообщений",
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    } else if (chat.lastMessage?.content is TdApi.MessageVideoNote) {
-                        Icon(
-                            painterResource(R.drawable.baseline_slow_motion_video_24),
-                            "photo",
-                            Modifier
-                                .size(16.dp)
-                                .align(Alignment.CenterVertically)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Видеосообщение",
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    } else if (chat.lastMessage?.content is TdApi.MessageVoiceNote) {
-                        Icon(
-                            painterResource(R.drawable.baseline_record_voice_over_24),
-                            "photo",
-                            Modifier
-                                .size(16.dp)
-                                .align(Alignment.CenterVertically)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Аудиосообщение",
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    } else if (chat.lastMessage?.content is TdApi.MessageSticker) {
-                        Icon(
-                            painterResource(R.drawable.baseline_emoji_emotions_24),
-                            "photo",
-                            Modifier
-                                .size(16.dp)
-                                .align(Alignment.CenterVertically)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = (chat.lastMessage?.content as TdApi.MessageSticker).sticker.emoji
-                                ?: "Стикер",
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    } else if (chat.lastMessage?.content is TdApi.MessageAnimation) {
-                        Icon(
-                            painterResource(R.drawable.baseline_image_24),
-                            "photo",
-                            Modifier
-                                .size(16.dp)
-                                .align(Alignment.CenterVertically)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = (chat.lastMessage?.content as TdApi.MessageAnimation).caption.text
-                                ?: "Стикер",
+                            text = it,
                             style = MaterialTheme.typography.bodyMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                }//messageAnimation, , , messageDice, , , messageGiveawayWinners, messageInvoice, messageLocation, messagePaidMedia, messageSticker, messageStory,, messageVenue
+                }
             }
             Spacer(modifier = Modifier.width(16.dp))
             chat.lastMessage?.date?.toLong()

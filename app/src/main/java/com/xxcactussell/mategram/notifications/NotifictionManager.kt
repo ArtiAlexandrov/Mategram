@@ -12,6 +12,7 @@ import android.graphics.Paint
 import android.graphics.Shader
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
 import com.xxcactussell.mategram.MainActivity
 import com.xxcactussell.mategram.R
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
@@ -97,7 +98,11 @@ object NotificationHelper {
             )
 
             // Create messaging style
-            val messagingStyle = NotificationCompat.MessagingStyle(chatTitle)
+            val messagingStyle = NotificationCompat.MessagingStyle(
+                Person.Builder().apply {
+                    setName(chatTitle)
+                }.build()
+            )
                 .setConversationTitle(chatTitle)
                 .setGroupConversation(false)
 
@@ -106,7 +111,9 @@ object NotificationHelper {
                 val message = NotificationCompat.MessagingStyle.Message(
                     messageInfo.text,
                     messageInfo.timestamp,
-                    messageInfo.senderName
+                    Person.Builder().apply {
+                        setName(messageInfo.senderName)
+                    }.build()
                 )
                 messagingStyle.addMessage(message)
             }
@@ -121,7 +128,7 @@ object NotificationHelper {
                 }
 
                 notification = NotificationCompat.Builder(context, CHANNEL_ID)
-                    .setSmallIcon(R.drawable.baseline_local_fire_department_24)
+                    .setSmallIcon(R.drawable.ic_notification)
                     .setContentTitle(messages.first().senderName)
                     .setContentText(messages.first().text)
                     .setLargeIcon(iconBitmap)
@@ -134,7 +141,7 @@ object NotificationHelper {
                     .build()
             } else {
                 notification = NotificationCompat.Builder(context, CHANNEL_ID)
-                    .setSmallIcon(R.drawable.baseline_local_fire_department_24)
+                    .setSmallIcon(R.drawable.ic_notification)
                     .setLargeIcon(iconBitmap)
                     .setPriority(NotificationCompat.PRIORITY_HIGH)
                     .setAutoCancel(true)

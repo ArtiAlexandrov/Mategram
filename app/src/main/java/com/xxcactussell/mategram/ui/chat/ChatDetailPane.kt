@@ -1,8 +1,20 @@
 package com.xxcactussell.mategram.ui.chat
 
+import android.graphics.BitmapFactory
+import android.util.Log
+import android.view.Window
+import android.view.WindowInsets
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideIn
+import androidx.compose.animation.slideOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -13,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,9 +35,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -42,6 +57,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,9 +68,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -70,13 +92,11 @@ import coil.compose.AsyncImage
 import com.xxcactussell.mategram.MainViewModel
 import com.xxcactussell.mategram.R
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
-import com.xxcactussell.mategram.kotlinx.telegram.core.convertUnixTimestampToDate
 import com.xxcactussell.mategram.kotlinx.telegram.core.convertUnixTimestampToDateByDay
 import com.xxcactussell.mategram.kotlinx.telegram.core.formatFileSize
 import com.xxcactussell.mategram.kotlinx.telegram.core.getDayFromDate
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
@@ -88,15 +108,23 @@ import org.drinkless.tdlib.TdApi.Video
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.IntOffset
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
+import org.drinkless.tdlib.TdApi.MessageDocument
+import org.drinkless.tdlib.TdApi.MessageSticker
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatDetailPane(
     chatId: Long,
+    window: Window,
     onBackClick: () -> Unit,
     viewModel: MainViewModel = viewModel(),
-    onShowInfo: () -> Unit
+    onShowInfo: () -> Unit,
+    onImageClick: (TdApi.Message) -> Unit
 ) {
     // Загружаем объект чата асинхронно при изменении chatId.
     var chat: TdApi.Chat? by remember { mutableStateOf(null) }
@@ -116,7 +144,11 @@ fun ChatDetailPane(
     var groupedMessages = groupMessagesByAlbum(messagesForChat)
     val listState = rememberLazyListState()
     var avatarPath by remember { mutableStateOf<String?>(null) }
-    println("PHOTOPATH: $avatarPath")
+    var inputMessageToReply by remember { mutableStateOf<TdApi.InputMessageReplyTo?>(null) }
+    var messageIdToReply by remember { mutableStateOf<Long?>(null) }
+    var messageTextToReply by remember { mutableStateOf<String?>(null) }
+    var senderNameForReply by remember { mutableStateOf<String?>(null) }
+    var selectedMessageId by remember { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(chat) {
         avatarPath = chat?.let { viewModel.getChatAvatarPath(it) }
@@ -231,9 +263,15 @@ fun ChatDetailPane(
             )
         },
         bottomBar = {
-            Row(modifier = Modifier.padding(8.dp).navigationBarsPadding(),
+            Row(modifier = Modifier
+                .padding(8.dp)
+                .navigationBarsPadding()
+                .background(Color.Transparent),
                 verticalAlignment = Alignment.Bottom) {
-                Card(modifier = Modifier.fillMaxWidth().weight(1f).wrapContentSize(),
+                Card(modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .wrapContentSize(),
                     shape = RoundedCornerShape(28.dp)
                 ) {
                     Row (modifier = Modifier
@@ -249,19 +287,26 @@ fun ChatDetailPane(
                             )
                         }
                         Box(
-                            modifier = Modifier.fillMaxWidth().weight(1f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
                         ) {
                             TextField(
                                 value = textNewMessage,
                                 onValueChange = { textNewMessage = it },
                                 placeholder = { Text("Cообщение") },
-                                modifier = Modifier.fillMaxWidth().align(Alignment.BottomStart),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .align(Alignment.BottomStart),
                                 colors = TextFieldDefaults.colors(
                                     focusedIndicatorColor = Color.Transparent,
                                     unfocusedIndicatorColor = Color.Transparent,
                                     disabledIndicatorColor = Color.Transparent
                                 ),
-                                maxLines = 5
+                                maxLines = 5,
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Sentences
+                                )
                             )
                         }
                         IconButton(
@@ -279,12 +324,15 @@ fun ChatDetailPane(
                 FilledIconButton(
                     modifier = Modifier.size(56.dp),
                     onClick = {
-                        viewModel.sendMessage(
-                            chatId = chatId,
-                            text = textNewMessage,
-                            replyToMessageId = null,
-                        )
-                        textNewMessage = ""
+                        if (textNewMessage != "") {
+                            viewModel.sendMessage(
+                                chatId = chatId,
+                                text = textNewMessage,
+                                replyToMessageId = inputMessageToReply,
+                            )
+                            textNewMessage = ""
+                            inputMessageToReply = null
+                        }
                     },
                 ) {
                     Icon(painterResource(R.drawable.baseline_send_24), contentDescription = "Extended floating action button.")
@@ -293,1171 +341,659 @@ fun ChatDetailPane(
         }
     ) { innerPadding ->
         // Основной контент экрана чата.
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize(),
-            reverseLayout = true
-        ) {
-            items(groupedMessages.size) { index ->
-                var isDateShown by remember { mutableStateOf(false) }
-                var date by remember { mutableStateOf("") }
-                var dateToCompare by remember { mutableLongStateOf(0L) }
-                var nextDateToCompare by remember { mutableLongStateOf(0L) }
-                Spacer(modifier = Modifier.height(8.dp))
-                when (val item = groupedMessages[index]) {
-                    is MediaAlbum -> {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalAlignment = if (!item.isOutgoing) Alignment.Start else Alignment.End
-                            ) {
-
-
-                                if (item.replyTo != null) {
-                                    var messageToReply by remember { mutableStateOf<TdApi.Message?>(null) }
-                                    LaunchedEffect(messagesForChat) {
-                                        if (item.replyTo is MessageReplyToMessage) {
-                                            messageToReply =
-                                                viewModel.getMessageById(item.replyTo)
-                                        }
-                                    }
-                                    var replyTitle by remember { mutableStateOf("") }
-                                    LaunchedEffect(messageToReply) {
-                                        if (messageToReply != null) {
-                                            if (messageToReply!!.senderId is TdApi.MessageSenderChat) {
-                                                val chatReply =
-                                                    api.getChat((messageToReply!!.senderId as TdApi.MessageSenderChat).chatId)
-                                                replyTitle = chatReply.title
-                                            } else if (messageToReply!!.senderId is TdApi.MessageSenderUser) {
-                                                // Получаем информацию о пользователе
-                                                val userId =
-                                                    (messageToReply!!.senderId as TdApi.MessageSenderUser).userId
-                                                val user = api.getUser(userId)
-                                                replyTitle = user.firstName + " " + user.lastName
-                                                // Извлекаем имя и фамилию пользователя
-                                            }
-                                        }
-                                    }
-                                    Row(
-                                        modifier = Modifier.widthIn(max = 200.dp)
-                                            .clickable {
-                                                scope.launch {
-                                                    var replyIndex =
-                                                        messagesForChat.indexOfFirst { it.id == messageToReply?.id }
-
-                                                    while (replyIndex == -1) { // Прерываем, если больше сообщений нет
-                                                        replyIndex =
-                                                            messagesForChat.indexOfFirst { it.id == messageToReply?.id }
-                                                        listState.animateScrollToItem(messagesForChat.indexOfFirst { it.id == messagesForChat.lastOrNull()?.id })
-                                                    }
-                                                    delay(300)
-                                                    listState.animateScrollToItem(replyIndex) // Прокручиваем к нужному сообщению
-                                                }
-                                            }
-                                    ) {
-                                        Column {
-                                            Text(
-                                                text = replyTitle,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Row {
-                                                if (messageToReply != null) {
-                                                    if (messageToReply!!.content is MessagePhoto) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_image_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as MessagePhoto).caption.text
-                                                                ?: "Нет сообщения",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is MessageVideo) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_video_file_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as MessageVideo).caption.text
-                                                                ?: "Нет сообщения",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is MessageText) {
-                                                        Text(
-                                                            text = (messageToReply!!.content as MessageText).text.text
-                                                                ?: "Нет сообщений",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageAudio) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_audio_file_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageAudio).caption.text
-                                                                ?: "Нет сообщений",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageContact) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_perm_contact_calendar_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageContact).contact.toString(),
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageDocument) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_edit_document_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageDocument).caption.text
-                                                                ?: "Нет сообщений",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageGame) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_videogame_asset_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageGame).game.toString(),
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageGiveaway) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_emoji_events_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageGiveaway).prize.toString(),
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessagePoll) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_poll_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as TdApi.MessagePoll).poll.question.text
-                                                                ?: "Нет сообщений",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageVideoNote) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_slow_motion_video_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = "Видеосообщение",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageVoiceNote) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_record_voice_over_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = "Аудиосообщение",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageSticker) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_emoji_emotions_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageSticker).sticker.emoji
-                                                                ?: "Стикер",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageAnimation) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_image_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageAnimation).caption.text
-                                                                ?: "Стикер",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    }
-                                                } else {
-                                                    Text(
-                                                        text = "Сообщение недоступно",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(4.dp))
-
-
-
-
-                                Card(
-                                    modifier = Modifier
-                                        .widthIn(max = 320.dp)
-                                        .clip(RoundedCornerShape(24.dp))
-                                        .clickable {
-                                            isDateShown = !isDateShown
-                                            date = convertUnixTimestampToDate(
-                                                item.date.toLong()
-                                            )
-                                        },
-                                    shape = RoundedCornerShape(24.dp),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = if (!item.isOutgoing)
-                                            MaterialTheme.colorScheme.primaryContainer
-                                        else
-                                            MaterialTheme.colorScheme.surfaceContainer
-                                    ),
-                                ) {
-                                    MediaCarousel(
-                                        album = item,
-                                        viewModel = viewModel
-                                    )
-                                }
-                                if (isDateShown) {
-                                    Text(
-                                        modifier = Modifier.padding(16.dp),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        text = date,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    is TdApi.Message -> {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalAlignment = if (!item.isOutgoing) Alignment.Start else Alignment.End
-                            ) {
-
-
-                                if (item.replyTo != null) {
-                                    var messageToReply by remember { mutableStateOf<TdApi.Message?>(null) }
-                                    LaunchedEffect(messagesForChat) {
-                                        if (item.replyTo is MessageReplyToMessage) {
-                                            messageToReply =
-                                                viewModel.getMessageById((item.replyTo as MessageReplyToMessage))
-                                        }
-                                    }
-                                    var replyTitle by remember { mutableStateOf("") }
-                                    LaunchedEffect(messageToReply) {
-                                        if (messageToReply != null) {
-                                            if (messageToReply!!.senderId is TdApi.MessageSenderChat) {
-                                                val chatReply =
-                                                    api.getChat((messageToReply!!.senderId as TdApi.MessageSenderChat).chatId)
-                                                replyTitle = chatReply.title
-                                            } else if (messageToReply!!.senderId is TdApi.MessageSenderUser) {
-                                                // Получаем информацию о пользователе
-                                                val userId =
-                                                    (messageToReply!!.senderId as TdApi.MessageSenderUser).userId
-                                                val user = api.getUser(userId)
-                                                replyTitle = user.firstName + " " + user.lastName
-                                                // Извлекаем имя и фамилию пользователя
-                                            }
-                                        }
-                                    }
-                                    Row(
-                                        modifier = Modifier.widthIn(max = 200.dp)
-                                            .clickable {
-                                                scope.launch {
-                                                    var replyIndex =
-                                                        messagesForChat.indexOfFirst { it.id == messageToReply?.id }
-
-                                                    while (replyIndex == -1) { // Прерываем, если больше сообщений нет
-                                                        replyIndex =
-                                                            messagesForChat.indexOfFirst { it.id == messageToReply?.id }
-                                                        listState.animateScrollToItem(messagesForChat.indexOfFirst { it.id == messagesForChat.lastOrNull()?.id })
-                                                    }
-                                                    delay(300)
-                                                    listState.animateScrollToItem(replyIndex) // Прокручиваем к нужному сообщению
-                                                }
-                                            }
-                                    ) {
-                                        Column {
-                                            Text(
-                                                text = replyTitle,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Row {
-                                                if (messageToReply != null) {
-                                                    if (messageToReply!!.content is MessagePhoto) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_image_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as MessagePhoto).caption.text
-                                                                ?: "Нет сообщения",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is MessageVideo) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_video_file_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as MessageVideo).caption.text
-                                                                ?: "Нет сообщения",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is MessageText) {
-                                                        Text(
-                                                            text = (messageToReply!!.content as MessageText).text.text
-                                                                ?: "Нет сообщений",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageAudio) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_audio_file_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageAudio).caption.text
-                                                                ?: "Нет сообщений",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageContact) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_perm_contact_calendar_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageContact).contact.toString(),
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageDocument) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_edit_document_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageDocument).caption.text
-                                                                ?: "Нет сообщений",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageGame) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_videogame_asset_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageGame).game.toString(),
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageGiveaway) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_emoji_events_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageGiveaway).prize.toString(),
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessagePoll) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_poll_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as TdApi.MessagePoll).poll.question.text
-                                                                ?: "Нет сообщений",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageVideoNote) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_slow_motion_video_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = "Видеосообщение",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageVoiceNote) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_record_voice_over_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = "Аудиосообщение",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageSticker) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_emoji_emotions_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageSticker).sticker.emoji
-                                                                ?: "Стикер",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    } else if (messageToReply!!.content is TdApi.MessageAnimation) {
-                                                        Icon(
-                                                            painterResource(R.drawable.baseline_image_24),
-                                                            "photo",
-                                                            Modifier
-                                                                .size(16.dp)
-                                                                .align(Alignment.CenterVertically)
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Text(
-                                                            text = (messageToReply!!.content as TdApi.MessageAnimation).caption.text
-                                                                ?: "Стикер",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    }
-                                                } else {
-                                                    Text(
-                                                        text = "Сообщение недоступно",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(4.dp))
-
-
-                                Card(
-                                    modifier = Modifier.widthIn(max = 320.dp)
-                                        .clip(RoundedCornerShape(24.dp))
-                                        .clickable {
-                                            isDateShown = !isDateShown
-                                            date = convertUnixTimestampToDate(
-                                                item.date.toLong()
-                                            )
-                                        },
-                                    shape = RoundedCornerShape(24.dp),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = if (!item.isOutgoing)
-                                            MaterialTheme.colorScheme.inversePrimary
-                                        else
-                                            MaterialTheme.colorScheme.surfaceVariant
-                                    ),
-                                ) {
-
-                                    if (item.content is MessageText) {
-                                        val formattedText = (item.content as MessageText).text
-                                        var revealedSpoilers by remember {
-                                            mutableStateOf(emptySet<IntRange>())
-                                        }
-                                        Text(
-                                            modifier = Modifier
-                                                .padding(16.dp),
-                                            text = buildAnnotatedString {
-                                                formattedText.entities.forEach { entity ->
-                                                    val start = entity.offset
-                                                    val end = entity.offset + entity.length
-                                                    val range = start until end
-                                                    when (entity.type) {
-                                                        is TdApi.TextEntityTypeTextUrl -> {
-                                                            addStyle(
-                                                                SpanStyle(
-                                                                    color = MaterialTheme.colorScheme.primary
-                                                                ),
-                                                                start, end
-                                                            )
-                                                            addLink(
-                                                                url = LinkAnnotation.Url((entity.type as TdApi.TextEntityTypeTextUrl).url),
-                                                                start = start,
-                                                                end = end
-                                                            )
-                                                        }
-                                                        is TdApi.TextEntityTypeUrl -> {
-                                                            val url = formattedText.text.substring(start, end)
-                                                            addStyle(
-                                                                SpanStyle(
-                                                                    color = MaterialTheme.colorScheme.primary,
-                                                                    textDecoration = TextDecoration.Underline
-                                                                ),
-                                                                start, end
-                                                            )
-                                                            addLink(
-                                                                url = LinkAnnotation.Url(url),
-                                                                start = start,
-                                                                end = end
-                                                            )
-                                                        }
-                                                        is TdApi.TextEntityTypeSpoiler -> {
-                                                            if (range in revealedSpoilers) {
-                                                                addStyle(
-                                                                    SpanStyle(
-                                                                        color = MaterialTheme.colorScheme.onSurface,
-                                                                        background = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                                                                    ),
-                                                                    start, end
-                                                                )
-                                                            } else {
-                                                                addStyle(
-                                                                    SpanStyle(
-                                                                        background = MaterialTheme.colorScheme.onSurface,
-                                                                        color = MaterialTheme.colorScheme.onSurface
-                                                                    ),
-                                                                    start, end
-                                                                )
-                                                            }
-                                                        }
-                                                        is TdApi.TextEntityTypeBold -> {
-                                                            addStyle(
-                                                                SpanStyle(fontWeight = FontWeight.Bold),
-                                                                start, end
-                                                            )
-                                                        }
-                                                        is TdApi.TextEntityTypeItalic -> {
-                                                            addStyle(
-                                                                SpanStyle(fontStyle = FontStyle.Italic),
-                                                                start, end
-                                                            )
-                                                        }
-                                                        is TdApi.TextEntityTypeCode -> {
-                                                            addStyle(
-                                                                SpanStyle(
-                                                                    fontFamily = FontFamily.Monospace,
-                                                                ),
-                                                                start, end
-                                                            )
-                                                        }
-                                                        is TdApi.TextEntityTypePreCode -> {
-                                                            addStyle(
-                                                                SpanStyle(
-                                                                    fontFamily = FontFamily.Monospace
-                                                                ),
-                                                                start, end
-                                                            )
-                                                        }
-                                                        is TdApi.TextEntityTypeMention -> {
-                                                            addStyle(
-                                                                SpanStyle(color = MaterialTheme.colorScheme.primary),
-                                                                start, end
-                                                            )
-                                                        }
-                                                        is TdApi.TextEntityTypeHashtag -> {
-                                                            addStyle(
-                                                                SpanStyle(color = MaterialTheme.colorScheme.primary),
-                                                                start, end
-                                                            )
-                                                        }
-                                                        is TdApi.TextEntityTypeUnderline -> {
-                                                            addStyle(
-                                                                SpanStyle(textDecoration = TextDecoration.Underline),
-                                                                start, end
-                                                            )
-                                                        }
-                                                        is TdApi.TextEntityTypeStrikethrough -> {
-                                                            addStyle(
-                                                                SpanStyle(textDecoration = TextDecoration.LineThrough),
-                                                                start, end
-                                                            )
-                                                        }
-                                                        is TdApi.TextEntityTypeBlockQuote -> {
-                                                            addStyle(
-                                                                SpanStyle(
-                                                                    fontStyle = FontStyle.Italic
-                                                                ),
-                                                                start, end
-                                                            )
-                                                        }
-                                                        is TdApi.TextEntityTypePre -> {
-                                                            addStyle(
-                                                                SpanStyle(
-                                                                    fontFamily = FontFamily.Monospace
-                                                                ),
-                                                                start, end
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                                append(formattedText.text)
-                                            },
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-
-                                    }
-
-
-                                    else if (item.content is TdApi.MessageSticker) {
-                                        val sticker =
-                                            (item.content as TdApi.MessageSticker).sticker
-                                        val stickerFile = sticker?.sticker
-                                        var stickerPath by remember { mutableStateOf<String?>(null) }
-
-                                        LaunchedEffect(stickerFile) {
-                                            stickerPath = viewModel.getStickerFromChat(stickerFile)
-                                        }
-
-                                        if (stickerPath != null) {
-                                            if (stickerPath!!.endsWith(".webp")) {
-                                                // Если формат WebP — используем AsyncImage
-                                                AsyncImage(
-                                                    model = stickerPath,
-                                                    contentDescription = "Стикер",
-                                                    contentScale = ContentScale.Fit,
-                                                    modifier = Modifier
-                                                        .size(200.dp)
-                                                        .clip(RoundedCornerShape(24.dp))
-                                                )
-                                            } else {
-                                                // Если формат WebM — используем VideoView
-                                                AndroidView(
-                                                    factory = { context ->
-                                                        PlayerView(context).apply {
-                                                            val player =
-                                                                ExoPlayer.Builder(context).build()
-                                                            this.player = player
-                                                            val mediaItem =
-                                                                MediaItem.fromUri(stickerPath!!)
-
-                                                            player.setMediaItem(mediaItem)
-                                                            player.repeatMode =
-                                                                Player.REPEAT_MODE_ALL // Зацикливаем воспроизведение
-                                                            player.prepare()
-                                                            player.play()
-
-                                                            // Убираем элементы управления
-                                                            this.useController = false
-                                                        }
-                                                    },
-                                                    modifier = Modifier
-                                                        .size(200.dp)
-                                                        .clip(RoundedCornerShape(24.dp))
-                                                )
-
-                                            }
-                                        } else {
-                                            Box(
-                                                modifier = Modifier.size(200.dp)
-                                                    .clip(RoundedCornerShape(24.dp))
-                                                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
-                                            ) {
-                                                CircularProgressIndicator(
-                                                    modifier = Modifier.size(40.dp)
-                                                        .align(Alignment.Center),
-                                                    color = MaterialTheme.colorScheme.primary
-                                                )
-                                            }
-                                        }
-                                    } else if (item.content is MessagePhoto) {
-                                        // Получаем нужный PhotoSize с type = "x"
-                                        val photoSize =
-                                            (item.content as MessagePhoto)
-                                                .photo?.sizes?.find { it.type == "x" }
-
-                                        // Запускаем загрузку фото и храним результат в `imagePath`
-                                        var imagePath by remember { mutableStateOf<String?>(null) }
-
-                                        LaunchedEffect(photoSize) {
-                                            imagePath = viewModel.getPhotoPreviewFromChat(photoSize)
-                                        }
-
-                                        // Передаём `imagePath` в `AsyncImage`
-
-
-                                        val caption =
-                                            (item.content as MessagePhoto).caption.text
-                                        if (caption != "") {
-                                            AsyncImage(
-                                                model = imagePath,
-                                                contentDescription = "Фото сообщения",
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier
-                                                    .width(320.dp)
-                                                    .heightIn(max = 320.dp)
-                                                    .clip(RoundedCornerShape(24.dp))
-                                            )
-                                            Text(
-                                                modifier = Modifier.padding(16.dp),
-                                                text = caption,
-                                                style = MaterialTheme.typography.bodyMedium
-                                            )
-                                        } else {
-                                            AsyncImage(
-                                                model = imagePath,
-                                                contentDescription = "Фото сообщения",
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier
-                                                    .widthIn(max = 320.dp)
-                                                    .clip(RoundedCornerShape(24.dp))
-                                            )
-                                        }
-                                    } else if (item.content is MessageVideo) {
-                                        val videoContent =
-                                            (item.content as MessageVideo).video
-                                        val thumbnailFile = (videoContent as Video).thumbnail?.file
-                                        var thumbnailPath by remember { mutableStateOf<String?>(null) }
-
-                                        LaunchedEffect(thumbnailFile) {
-                                            thumbnailPath =
-                                                viewModel.getThumbnailVideoFromChat(thumbnailFile)
-                                        }
-
-                                        val caption =
-                                            (item.content as MessageVideo).caption.text
-
-                                        if (caption.isNotEmpty()) {
-                                            Column {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .width(320.dp)
-                                                        .height(320.dp)
-                                                        .clip(RoundedCornerShape(24.dp))
-                                                ) {
-                                                    // Отображаем превью вместо видео
-                                                    AsyncImage(
-                                                        model = thumbnailPath,
-                                                        contentDescription = "Видео превью",
-                                                        contentScale = ContentScale.Crop,
-                                                        modifier = Modifier.fillMaxSize()
-                                                    )
-
-                                                    // Кнопка "Play" по центру
-                                                    IconButton(
-                                                        onClick = {
-
-                                                        },
-                                                        modifier = Modifier.align(Alignment.Center)
-                                                    ) {
-                                                        Icon(
-                                                            painter = painterResource(R.drawable.baseline_play_arrow_24),
-                                                            contentDescription = "Запустить видео",
-                                                            modifier = Modifier.size(64.dp),
-                                                            tint = Color.White
-                                                        )
-                                                    }
-                                                }
-                                                Text(
-                                                    modifier = Modifier.padding(16.dp),
-                                                    text = caption,
-                                                    style = MaterialTheme.typography.bodyMedium
-                                                )
-                                            }
-                                        } else {
-                                            Box(
-                                                modifier = Modifier
-                                                    .widthIn(max = 320.dp)
-                                                    .clip(RoundedCornerShape(24.dp))
-                                            ) {
-                                                // Отображаем превью вместо видео
-                                                AsyncImage(
-                                                    model = thumbnailPath,
-                                                    contentDescription = "Видео превью",
-                                                    contentScale = ContentScale.Crop,
-                                                    modifier = Modifier.fillMaxSize()
-                                                        .widthIn(max = 320.dp)
-                                                        .height(320.dp)
-                                                )
-
-                                                // Кнопка "Play" по центру
-                                                IconButton(
-                                                    onClick = {
-
-                                                    },
-                                                    modifier = Modifier.align(Alignment.Center)
-                                                ) {
-                                                    Icon(
-                                                        painter = painterResource(R.drawable.baseline_play_arrow_24),
-                                                        contentDescription = "Запустить видео",
-                                                        modifier = Modifier.size(64.dp),
-                                                        tint = Color.White
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    } else if (item.content is TdApi.MessageDocument) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(16.dp)
-                                        ) {
-                                            val document =
-                                                (item.content as TdApi.MessageDocument).document
-                                            val documentFile = document?.document
-                                            val documentThumbnail = document?.thumbnail
-                                            val documentName = document?.fileName.toString()
-
-                                            var documentThumbnailPath by remember {
-                                                mutableStateOf<String?>(
-                                                    null
-                                                )
-                                            }
-                                            var uploadedSize by remember { mutableStateOf<String?>("") }
-                                            var isDownloading by remember { mutableStateOf(false) }
-                                            var isFileDownloaded by remember { mutableStateOf(false) }
-
-                                            // Загрузка миниатюры
-                                            if (documentThumbnail != null) {
-                                                LaunchedEffect(documentThumbnail) {
-                                                    documentThumbnailPath =
-                                                        viewModel.getDocumentThumbnail(
-                                                            documentThumbnail
-                                                        )
-                                                }
-                                            }
-
-                                            // Получаем размер файла
-                                            LaunchedEffect(uploadedSize) {
-                                                val fileSize =
-                                                    documentFile?.expectedSize?.toInt() ?: 0
-                                                uploadedSize = formatFileSize(fileSize)
-                                            }
-
-                                            val context = LocalContext.current
-
-                                            val onDownloadClick: () -> Unit = {
-                                                scope.launch {
-                                                    isDownloading = true
-                                                    documentFile?.let { file ->
-                                                        val downloadedFilePath =
-                                                            viewModel.downloadFileToDownloads(
-                                                                context,
-                                                                file.id,
-                                                                documentName
-                                                            )
-                                                        if (downloadedFilePath != null) {
-                                                            isFileDownloaded = true
-                                                            isDownloading = false
-                                                            Toast.makeText(
-                                                                context,
-                                                                "Файл загружен: $downloadedFilePath",
-                                                                Toast.LENGTH_SHORT
-                                                            ).show()
-                                                        } else {
-                                                            isDownloading = false
-                                                            Toast.makeText(
-                                                                context,
-                                                                "Ошибка загрузки файла",
-                                                                Toast.LENGTH_SHORT
-                                                            ).show()
-                                                        }
-                                                    }
-                                                }
-                                            }
-
-                                            // Отображение в зависимости от состояния файла
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(80.dp)
-                                                    .clip(RoundedCornerShape(16.dp))
-                                                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                                                    .clickable { onDownloadClick() }, // Клик для загрузки
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                when {
-                                                    isDownloading -> {
-                                                        CircularProgressIndicator(
-                                                            modifier = Modifier.size(40.dp),
-                                                            color = MaterialTheme.colorScheme.primary
-                                                        )
-                                                    }
-
-                                                    isFileDownloaded -> {
-                                                        if (documentThumbnailPath != null) {
-                                                            AsyncImage(
-                                                                model = documentThumbnailPath,
-                                                                contentDescription = "Документ",
-                                                                modifier = Modifier
-                                                                    .size(80.dp)
-                                                                    .clip(RoundedCornerShape(16.dp))
-                                                                    .clickable { onDownloadClick() }, // Клик для повторной загрузки
-                                                                contentScale = ContentScale.Crop
-                                                            )
-                                                        } else {
-                                                            Icon(
-                                                                painter = painterResource(R.drawable.baseline_insert_drive_file_24),
-                                                                contentDescription = "Документ",
-                                                                modifier = Modifier.size(40.dp),
-                                                                tint = MaterialTheme.colorScheme.onSurface
-                                                            )
-                                                        }
-                                                    }
-
-                                                    else -> {
-                                                        Icon(
-                                                            painter = painterResource(R.drawable.ic_download),
-                                                            contentDescription = "Скачать документ",
-                                                            modifier = Modifier.size(40.dp),
-                                                            tint = MaterialTheme.colorScheme.primary
-                                                        )
-                                                    }
-                                                }
-                                            }
-
-                                            Spacer(modifier = Modifier.width(16.dp))
-
-                                            Column {
-                                                Text(
-                                                    text = documentName,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    maxLines = 2,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                if (uploadedSize != null) {
-                                                    Text(
-                                                        text = uploadedSize!!,
-                                                        style = MaterialTheme.typography.labelMedium
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        Text(
-                                            modifier = Modifier.padding(16.dp),
-                                            text = item.toString(),
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-                                    }
-                                }
-
-                                if (isDateShown) {
-                                    Text(
-                                        modifier = Modifier.padding(16.dp),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        text = date,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-                try {
-                    when (groupedMessages[index]) {
-                        is MediaAlbum -> {
-                            dateToCompare = getDayFromDate(
-                                (groupedMessages[index] as MediaAlbum).date.toLong()
-                            )
-                        }
-
-                        is TdApi.Message -> {
-                            dateToCompare = getDayFromDate(
-                                (groupedMessages[index] as TdApi.Message).date.toLong()
-                            )
-                        }
-                    }
-                    when (groupedMessages[index + 1]) {
-                        is MediaAlbum -> {
-                            nextDateToCompare = getDayFromDate(
-                                (groupedMessages[index + 1] as MediaAlbum).date.toLong()
-                            )
-                        }
-
-                        is TdApi.Message -> {
-                            nextDateToCompare = getDayFromDate(
-                                (groupedMessages[index + 1] as TdApi.Message).date.toLong()
-                            )
-                        }
-                    }
-                } catch (e: IndexOutOfBoundsException) {
-                    // Игнорируем ошибку выхода за пределы массива
-                }
-                if (nextDateToCompare < dateToCompare) {
+        Box (modifier = Modifier
+            .fillMaxSize()
+            .padding(innerPadding))
+        {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier,
+                reverseLayout = true
+            ) {
+                items(groupedMessages.size) { index ->
+                    var isDateShown by remember { mutableStateOf(false) }
+                    var date by remember { mutableStateOf("") }
+                    var dateToCompare by remember { mutableLongStateOf(0L) }
+                    var nextDateToCompare by remember { mutableLongStateOf(0L) }
                     Spacer(modifier = Modifier.height(8.dp))
-                    Box(
+
+                    val messageId = if(groupedMessages[index] is MediaAlbum) {
+                        (groupedMessages[index] as MediaAlbum).id
+                    } else {
+                        (groupedMessages[index] as TdApi.Message).id
+                    }
+
+                    val isOutgoing = if(groupedMessages[index] is MediaAlbum) {
+                        (groupedMessages[index] as MediaAlbum).isOutgoing
+                    } else {
+                        (groupedMessages[index] as TdApi.Message).isOutgoing
+                    }
+
+                    val replyTo = if(groupedMessages[index] is MediaAlbum) {
+                        (groupedMessages[index] as MediaAlbum).replyTo
+                    } else {
+                        (groupedMessages[index] as TdApi.Message).replyTo
+                    }
+
+                    val dateMessage = if (groupedMessages[index] is MediaAlbum) {
+                        convertUnixTimestampToDateByDay(
+                            (groupedMessages[index] as MediaAlbum).date.toLong()
+                        )
+                    } else {
+                        convertUnixTimestampToDateByDay(
+                            (groupedMessages[index] as TdApi.Message).date.toLong()
+                        )
+                    }
+
+                    DraggableBox(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
+                            .padding(horizontal = 16.dp),
+                        onDragComplete = {
+                            inputMessageToReply =
+                                TdApi.InputMessageReplyToMessage(messageId, null)
+                            messageIdToReply = messageId
+                        }
                     ) {
                         Column(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                            horizontalAlignment = if (!isOutgoing) Alignment.Start else Alignment.End
                         ) {
-                            Text(
-                                text = convertUnixTimestampToDateByDay(dateToCompare * 86400),
-                                style = MaterialTheme.typography.labelSmall
+                            RepliedMessage(
+                                replyTo = replyTo,
+                                viewModel = viewModel,
+                                onClick = {
+
+                                }
+                            )
+                            Card(
+                                modifier = Modifier
+                                    .widthIn(max = 320.dp)
+                                    .clip(RoundedCornerShape(24.dp))
+                                    .clickable {
+                                        isDateShown = !isDateShown
+                                        date = dateMessage
+                                    },
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (!isOutgoing)
+                                        MaterialTheme.colorScheme.inversePrimary
+                                    else
+                                        MaterialTheme.colorScheme.surfaceVariant
+                                ),
+                            ) {
+                                when (val item = groupedMessages[index]) {
+                                    is MediaAlbum -> {
+                                        MediaCarousel(
+                                            album = item,
+                                            viewModel = viewModel,
+                                            onMediaClick = { message ->
+                                                selectedMessageId = message.id
+                                            },
+                                        )
+                                    }
+                                    is TdApi.Message -> {
+                                        when (val content = item.content) {
+                                            is MessageText -> {
+                                                val formattedText = content.text
+                                                Text(
+                                                    modifier = Modifier.padding(16.dp),
+                                                    text = getAnnotatedString(formattedText),
+                                                    style = MaterialTheme.typography.bodyMedium
+                                                )
+                                            }
+                                            is MessageVideo -> {
+                                                val videoContent = (item.content as MessageVideo).video
+                                                val thumbnailFile = (videoContent as Video).thumbnail?.file
+                                                var thumbnailPath by remember { mutableStateOf<String?>(null) }
+                                                val caption = content.caption
+
+                                                LaunchedEffect(thumbnailFile) {
+                                                    thumbnailPath =
+                                                        viewModel.getThumbnailVideoFromChat(
+                                                            thumbnailFile
+                                                        )
+                                                }
+
+                                                Column {
+
+                                                    if (caption.text != "" && content.showCaptionAboveMedia) {
+                                                        Text(
+                                                            modifier = Modifier.padding(16.dp),
+                                                            text = getAnnotatedString(caption),
+                                                            style = MaterialTheme.typography.bodyMedium
+                                                        )
+                                                    }
+
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .width(320.dp)
+                                                            .height(320.dp)
+                                                            .clip(RoundedCornerShape(24.dp))
+                                                    ) {
+                                                        AsyncImage(
+                                                            model = thumbnailPath,
+                                                            contentDescription = "Видео превью",
+                                                            contentScale = ContentScale.Crop,
+                                                            modifier = Modifier.fillMaxSize()
+                                                        )
+                                                        IconButton(
+                                                            onClick = {
+                                                                selectedMessageId = item.id
+                                                            },
+                                                            modifier = Modifier.align(Alignment.Center)
+                                                        ) {
+                                                            Icon(
+                                                                painter = painterResource(R.drawable.baseline_play_arrow_24),
+                                                                contentDescription = "Запустить видео",
+                                                                modifier = Modifier.size(64.dp),
+                                                                tint = Color.White
+                                                            )
+                                                        }
+                                                    }
+
+                                                    if (caption.text != "" && !content.showCaptionAboveMedia) {
+                                                        Text(
+                                                            modifier = Modifier.padding(16.dp),
+                                                            text = getAnnotatedString(caption),
+                                                            style = MaterialTheme.typography.bodyMedium
+                                                        )
+                                                    }
+
+                                                }
+                                            }
+                                            is MessagePhoto -> {
+                                                val photoSize = content.photo?.sizes?.find { it.type == "x" }
+                                                var imagePath by remember { mutableStateOf<String?>(null) }
+                                                val caption = content.caption
+
+                                                LaunchedEffect(photoSize) {
+                                                    imagePath = viewModel.getPhotoPreviewFromChat(photoSize)
+                                                }
+
+                                                Column {
+                                                    if (caption.text != "" && content.showCaptionAboveMedia) {
+                                                        Text(
+                                                            modifier = Modifier.padding(16.dp),
+                                                            text = getAnnotatedString(caption),
+                                                            style = MaterialTheme.typography.bodyMedium
+                                                        )
+                                                    }
+                                                    AsyncImage(
+                                                        model = imagePath,
+                                                        contentDescription = "Фото сообщения",
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier
+                                                            .width(320.dp)
+                                                            .heightIn(max = 320.dp)
+                                                            .clip(RoundedCornerShape(24.dp))
+                                                            .clickable {
+                                                                selectedMessageId = item.id
+                                                            }
+                                                    )
+                                                    if (caption.text != "" && !content.showCaptionAboveMedia) {
+                                                        Text(
+                                                            modifier = Modifier.padding(16.dp),
+                                                            text = getAnnotatedString(caption),
+                                                            style = MaterialTheme.typography.bodyMedium
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            is MessageDocument -> {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(16.dp)
+                                                ) {
+                                                    val document = (item.content as MessageDocument).document
+                                                    val documentFile = document?.document
+                                                    val documentThumbnail = document?.thumbnail
+                                                    val documentName = document?.fileName.toString()
+
+                                                    var documentThumbnailPath by remember { mutableStateOf<String?>(null) }
+                                                    var uploadedSize by remember { mutableStateOf<String?>("") }
+                                                    var isDownloading by remember { mutableStateOf(false) }
+                                                    var isFileDownloaded by remember { mutableStateOf(false) }
+
+                                                    // Загрузка миниатюры
+                                                    if (documentThumbnail != null) {
+                                                        LaunchedEffect(documentThumbnail) {
+                                                            documentThumbnailPath = viewModel.getDocumentThumbnail(documentThumbnail)
+                                                        }
+                                                    }
+
+                                                    // Получаем размер файла
+                                                    LaunchedEffect(uploadedSize) {
+                                                        val fileSize =
+                                                            documentFile?.expectedSize?.toInt() ?: 0
+                                                        uploadedSize = formatFileSize(fileSize)
+                                                    }
+
+                                                    val context = LocalContext.current
+
+                                                    val onDownloadClick: () -> Unit = {
+                                                        scope.launch {
+                                                            isDownloading = true
+                                                            documentFile?.let { file ->
+                                                                val downloadedFilePath =
+                                                                    viewModel.downloadFileToDownloads(
+                                                                        context,
+                                                                        file.id,
+                                                                        documentName
+                                                                    )
+                                                                if (downloadedFilePath != null) {
+                                                                    isFileDownloaded = true
+                                                                    isDownloading = false
+                                                                    Toast.makeText(
+                                                                        context,
+                                                                        "Файл загружен: $downloadedFilePath",
+                                                                        Toast.LENGTH_SHORT
+                                                                    ).show()
+                                                                } else {
+                                                                    isDownloading = false
+                                                                    Toast.makeText(
+                                                                        context,
+                                                                        "Ошибка загрузки файла",
+                                                                        Toast.LENGTH_SHORT
+                                                                    ).show()
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    // Отображение в зависимости от состояния файла
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(80.dp)
+                                                            .clip(RoundedCornerShape(16.dp))
+                                                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                                                            .clickable { onDownloadClick() }, // Клик для загрузки
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        when {
+                                                            isDownloading -> {
+                                                                CircularProgressIndicator(
+                                                                    modifier = Modifier.size(40.dp),
+                                                                    color = MaterialTheme.colorScheme.primary
+                                                                )
+                                                            }
+
+                                                            isFileDownloaded -> {
+                                                                if (documentThumbnailPath != null) {
+                                                                    AsyncImage(
+                                                                        model = documentThumbnailPath,
+                                                                        contentDescription = "Документ",
+                                                                        modifier = Modifier
+                                                                            .size(80.dp)
+                                                                            .clip(RoundedCornerShape(16.dp))
+                                                                            .clickable { onDownloadClick() }, // Клик для повторной загрузки
+                                                                        contentScale = ContentScale.Crop
+                                                                    )
+                                                                } else {
+                                                                    Icon(
+                                                                        painter = painterResource(R.drawable.baseline_insert_drive_file_24),
+                                                                        contentDescription = "Документ",
+                                                                        modifier = Modifier.size(40.dp),
+                                                                        tint = MaterialTheme.colorScheme.onSurface
+                                                                    )
+                                                                }
+                                                            }
+
+                                                            else -> {
+                                                                Icon(
+                                                                    painter = painterResource(R.drawable.ic_download),
+                                                                    contentDescription = "Скачать документ",
+                                                                    modifier = Modifier.size(40.dp),
+                                                                    tint = MaterialTheme.colorScheme.primary
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+
+                                                    Spacer(modifier = Modifier.width(16.dp))
+
+                                                    Column {
+                                                        Text(
+                                                            text = documentName,
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            maxLines = 2,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                        if (uploadedSize != null) {
+                                                            Text(
+                                                                text = uploadedSize!!,
+                                                                style = MaterialTheme.typography.labelMedium
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            is MessageSticker -> {
+                                                val sticker = (item.content as MessageSticker).sticker
+                                                val stickerFile = sticker?.sticker
+                                                var stickerPath by remember { mutableStateOf<String?>(null) }
+
+                                                LaunchedEffect(stickerFile) {
+                                                    stickerPath =
+                                                        viewModel.getStickerFromChat(stickerFile)
+                                                }
+
+                                                if (stickerPath != null) {
+                                                    if (stickerPath!!.endsWith(".webp")) {
+                                                        // Если формат WebP — используем AsyncImage
+                                                        AsyncImage(
+                                                            model = stickerPath,
+                                                            contentDescription = "Стикер",
+                                                            contentScale = ContentScale.Fit,
+                                                            modifier = Modifier
+                                                                .size(200.dp)
+                                                                .clip(RoundedCornerShape(24.dp))
+                                                        )
+                                                    } else {
+                                                        // Если формат WebM — используем VideoView
+                                                        AndroidView(
+                                                            factory = { context ->
+                                                                PlayerView(context).apply {
+                                                                    val player =
+                                                                        ExoPlayer.Builder(context)
+                                                                            .build()
+                                                                    this.player = player
+                                                                    val mediaItem =
+                                                                        MediaItem.fromUri(stickerPath!!)
+
+                                                                    player.setMediaItem(mediaItem)
+                                                                    player.repeatMode =
+                                                                        Player.REPEAT_MODE_ALL // Зацикливаем воспроизведение
+                                                                    player.prepare()
+                                                                    player.play()
+
+                                                                    // Убираем элементы управления
+                                                                    this.useController = false
+                                                                }
+                                                            },
+                                                            modifier = Modifier
+                                                                .size(200.dp)
+                                                                .clip(RoundedCornerShape(24.dp))
+                                                        )
+
+                                                    }
+                                                } else {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(200.dp)
+                                                            .clip(RoundedCornerShape(24.dp))
+                                                            .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                                                    ) {
+                                                        CircularProgressIndicator(
+                                                            modifier = Modifier
+                                                                .size(40.dp)
+                                                                .align(Alignment.Center),
+                                                            color = MaterialTheme.colorScheme.primary
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            else -> {
+                                                Text(
+                                                    modifier = Modifier.padding(16.dp),
+                                                    text = stringResource(R.string.unsupportedMessage),
+                                                    style = MaterialTheme.typography.bodyMedium
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if (isDateShown) {
+                                Text(
+                                    modifier = Modifier.padding(16.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    text = date,
+                                )
+                            }
+                        }
+                    }
+                    try {
+                        when (groupedMessages[index]) {
+                            is MediaAlbum -> {
+                                dateToCompare = getDayFromDate(
+                                    (groupedMessages[index] as MediaAlbum).date.toLong()
+                                )
+                            }
+
+                            is TdApi.Message -> {
+                                dateToCompare = getDayFromDate(
+                                    (groupedMessages[index] as TdApi.Message).date.toLong()
+                                )
+                            }
+                        }
+                        when (groupedMessages[index + 1]) {
+                            is MediaAlbum -> {
+                                nextDateToCompare = getDayFromDate(
+                                    (groupedMessages[index + 1] as MediaAlbum).date.toLong()
+                                )
+                            }
+
+                            is TdApi.Message -> {
+                                nextDateToCompare = getDayFromDate(
+                                    (groupedMessages[index + 1] as TdApi.Message).date.toLong()
+                                )
+                            }
+                        }
+                    } catch (e: IndexOutOfBoundsException) {
+                        // Игнорируем ошибку выхода за пределы массива
+                    }
+                    if (nextDateToCompare < dateToCompare) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = convertUnixTimestampToDateByDay(dateToCompare * 86400),
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+                // Индикатор загрузки
+                if (isLoadingMore) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
                 }
             }
-            // Индикатор загрузки
-            if (isLoadingMore) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        contentAlignment = Alignment.Center
+            var messageContent = MessageContent(
+                null,
+                null,
+                null
+            )
+            if (inputMessageToReply != null) {
+                LaunchedEffect(messageIdToReply) {
+                    var messageToReply: TdApi.Message? = null
+                    if (messageIdToReply != null) {
+                        messageToReply = api.getMessage(chatId, messageIdToReply!!)
+
+                        if (messageToReply.senderId is TdApi.MessageSenderChat) {
+                            val chatReply =
+                                api.getChat((messageToReply.senderId as TdApi.MessageSenderChat).chatId)
+                            senderNameForReply = chatReply.title
+                        } else if (messageToReply.senderId is TdApi.MessageSenderUser) {
+                            // Получаем информацию о пользователе
+                            val userId =
+                                (messageToReply.senderId as TdApi.MessageSenderUser).userId
+                            val user = api.getUser(userId)
+                            senderNameForReply =
+                                user.firstName + " " + user.lastName
+                            // Извлекаем имя и фамилию пользователя
+                        }
+                    }
+                    messageContent =
+                        messageToReply?.let { getMessageContent(chatId, it.id, viewModel) }!!
+                    messageTextToReply = messageContent.textForReply
+                }
+            }
+            AnimatedVisibility(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(16.dp),
+                visible = inputMessageToReply != null,
+                enter = slideIn { IntOffset(0, it.height * 2) } + fadeIn(),
+                exit = slideOut { IntOffset(0, it.height * 2) } + fadeOut()
+            ) {
+                ElevatedCard(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                    ),
+                    shape = RoundedCornerShape(40.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = MaterialTheme.colorScheme.primary
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            painterResource(R.drawable.baseline_reply_24), "Ответ"
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        if (messageContent.thumbnail != null) {
+                            ByteArrayImage(
+                                imageData = messageContent.thumbnail!!,
+                                contentDescription = "Медиа в ответе",
+                                modifier = Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)),
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "$senderNameForReply",
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "$messageTextToReply",
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        IconButton(
+                            onClick = {
+                                inputMessageToReply = null
+                                messageIdToReply = null
+                            }
+                        ) {
+                            Icon(painterResource(R.drawable.baseline_close_24), "Отменить")
+                        }
+                    }
+                }
+            }
+
+        }
+    }
+    selectedMessageId?.let { messageId ->
+        ChatImageViewer(
+            chatId = chatId,
+            messageId = messageId,
+            viewModel = viewModel,
+            window = window,
+            onDismiss = {
+                window.insetsController?.show(WindowInsets.Type.systemBars())
+                selectedMessageId = null
+            }
+        )
+    }
+}
+
+@Composable
+fun RepliedMessage(replyTo: TdApi.MessageReplyTo?, viewModel: MainViewModel, onClick: () -> Unit) {
+    if (replyTo != null) {
+        var messageToReply by remember { mutableStateOf<TdApi.Message?>(null) }
+        var messageContent by remember { mutableStateOf<MessageContent?>(null) }
+        var messageTextToReply by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(replyTo) {
+            if (replyTo is MessageReplyToMessage) {
+                messageToReply = viewModel.getMessageById(replyTo)
+            }
+            messageContent = messageToReply?.let { getMessageContent(it.chatId, it.id, viewModel) }!!
+            messageTextToReply = messageContent?.textForReply
+            Log.d("MESSAGE TH", "Message thumbnail: ${messageContent!!.thumbnail}")
+            Log.d("MESSAGE TH", "Message to reply: $messageToReply")
+        }
+
+        var replyTitle by remember { mutableStateOf("") }
+        LaunchedEffect(messageToReply) {
+            if (messageToReply != null) {
+                if (messageToReply!!.senderId is TdApi.MessageSenderChat) {
+                    val chatReply =
+                        api.getChat((messageToReply!!.senderId as TdApi.MessageSenderChat).chatId)
+                    replyTitle = chatReply.title
+                } else if (messageToReply!!.senderId is TdApi.MessageSenderUser) {
+                    // Получаем информацию о пользователе
+                    val userId =
+                        (messageToReply!!.senderId as TdApi.MessageSenderUser).userId
+                    val user = api.getUser(userId)
+                    replyTitle =
+                        user.firstName + " " + user.lastName
+                    // Извлекаем имя и фамилию пользователя
+                }
+            }
+        }
+        Row(
+            modifier = Modifier
+                .widthIn(max = 200.dp)
+                .clickable {
+                    onClick()
+                }
+        ) {
+            Column {
+                Text(
+                    text = replyTitle,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Row {
+                    messageContent?.thumbnail?.let {
+                        ByteArrayImage(
+                            imageData = it,
+                            contentDescription = "Медиа в ответе",
+                            modifier = Modifier.size(16.dp).clip(RoundedCornerShape(4.dp)),
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+                    if (messageTextToReply != null) {
+                        Text(
+                            text = messageTextToReply!!,
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
             }
         }
     }
+    Spacer(modifier = Modifier.height(4.dp))
 }
 
 
@@ -1475,13 +1011,15 @@ private fun groupMessagesByAlbum(messages: List<TdApi.Message>): List<Any> {
                 if (currentAlbumMessages.size > 1) {
                     val isOutgoing = currentAlbumMessages[0].isOutgoing
                     val date = currentAlbumMessages[0].date
+                    val id = currentAlbumMessages[0].id
                     // Находим первое сообщение с replyTo в альбоме
                     val replyTo = currentAlbumMessages.firstOrNull { it.replyTo != null }?.replyTo
                     result.add(MediaAlbum(
                         messages = currentAlbumMessages.toList(),
                         isOutgoing = isOutgoing,
                         replyTo = replyTo,
-                        date = date
+                        date = date,
+                        id = id
                     ))
                 } else {
                     result.add(currentAlbumMessages[0])
@@ -1493,13 +1031,15 @@ private fun groupMessagesByAlbum(messages: List<TdApi.Message>): List<Any> {
                 if (currentAlbumMessages.size > 1) {
                     val isOutgoing = currentAlbumMessages[0].isOutgoing
                     val date = currentAlbumMessages[0].date
+                    val id = currentAlbumMessages[0].id
                     // Находим первое сообщение с replyTo в альбоме
                     val replyTo = currentAlbumMessages.firstOrNull { it.replyTo != null }?.replyTo
                     result.add(MediaAlbum(
                         messages = currentAlbumMessages.toList(),
                         isOutgoing = isOutgoing,
                         replyTo = replyTo,
-                        date = date
+                        date = date,
+                        id = id
                     ))
                 } else {
                     result.add(currentAlbumMessages[0])
@@ -1514,13 +1054,15 @@ private fun groupMessagesByAlbum(messages: List<TdApi.Message>): List<Any> {
         if (currentAlbumMessages.size > 1) {
             val isOutgoing = currentAlbumMessages[0].isOutgoing
             val date = currentAlbumMessages[0].date
+            val id = currentAlbumMessages[0].id
             // Находим первое сообщение с replyTo в альбоме
             val replyTo = currentAlbumMessages.firstOrNull { it.replyTo != null }?.replyTo
             result.add(MediaAlbum(
                 messages = currentAlbumMessages.toList(),
                 isOutgoing = isOutgoing,
                 replyTo = replyTo,
-                date = date
+                date = date,
+                id = id
             ))
         } else {
             result.add(currentAlbumMessages[0])
@@ -1531,7 +1073,8 @@ private fun groupMessagesByAlbum(messages: List<TdApi.Message>): List<Any> {
 }
 
 // Создадим класс для хранения альбома
-data class MediaAlbum(val messages: List<TdApi.Message>, val isOutgoing: Boolean, val replyTo: TdApi.MessageReplyTo?, val date: Int)
+data class MediaAlbum(val messages: List<TdApi.Message>, val isOutgoing: Boolean, val replyTo: TdApi.MessageReplyTo?, val date: Int, val id: Long) {
+}
 
 // Создадим Composable для отображения карусели
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1539,7 +1082,8 @@ data class MediaAlbum(val messages: List<TdApi.Message>, val isOutgoing: Boolean
 fun MediaCarousel(
     album: MediaAlbum,
     viewModel: MainViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onMediaClick: (TdApi.Message) -> Unit
 ) {
     val carouselState = rememberCarouselState { album.messages.size }
 
@@ -1560,14 +1104,14 @@ fun MediaCarousel(
                     Box(
                         modifier = Modifier.maskClip(MaterialTheme.shapes.medium)
                     ) {
-                        PhotoContent(message = message, viewModel = viewModel)
+                        PhotoContent(message = message, viewModel = viewModel, onMediaClick = onMediaClick)
                     }
                 }
                 is MessageVideo -> {
                     Box(
                         modifier = Modifier.maskClip(MaterialTheme.shapes.medium)
                     ) {
-                        VideoContent(message = message, viewModel = viewModel)
+                        VideoContent(message = message, viewModel = viewModel, onMediaClick = onMediaClick)
                     }
                 }
             }
@@ -1599,7 +1143,8 @@ fun MediaCarousel(
 fun PhotoContent(
     message: TdApi.Message,
     viewModel: MainViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onMediaClick: (TdApi.Message) -> Unit
 ) {
     val photoSize = (message.content as MessagePhoto).photo?.sizes?.find { it.type == "x" }
     var imagePath by remember { mutableStateOf<String?>(null) }
@@ -1614,6 +1159,7 @@ fun PhotoContent(
         contentScale = ContentScale.Crop,
         modifier = Modifier
             .height(320.dp)
+            .clickable(onClick = { onMediaClick(message) } )
     )
 }
 
@@ -1621,7 +1167,8 @@ fun PhotoContent(
 fun VideoContent(
     message: TdApi.Message,
     viewModel: MainViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onMediaClick: (TdApi.Message) -> Unit
 ) {
     val videoContent = (message.content as MessageVideo).video
     val thumbnailFile = (videoContent as Video).thumbnail?.file
@@ -1643,7 +1190,7 @@ fun VideoContent(
         )
 
         IconButton(
-            onClick = { /* TODO: Implement video playback */ },
+            onClick = { onMediaClick(message) },
             modifier = Modifier.align(Alignment.Center)
         ) {
             Icon(
@@ -1653,5 +1200,199 @@ fun VideoContent(
                 tint = Color.White
             )
         }
+    }
+}
+
+@Composable
+fun ByteArrayImage(
+    imageData: ByteArray,
+    contentDescription: String?,
+    modifier: Modifier = Modifier
+) {
+    val bitmap = remember(imageData) {
+        BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
+    }
+
+    Image(
+        bitmap = bitmap?.asImageBitmap() ?: ImageBitmap(1, 1),
+        contentDescription = contentDescription,
+        modifier = modifier,
+        contentScale = ContentScale.Crop
+    )
+}
+
+
+@Composable
+fun DraggableBox(
+    modifier: Modifier = Modifier,
+    onDragComplete: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    val density = LocalDensity.current
+    val swipeThreshold = with(density) { 20.dp.toPx() }
+    val animatedOffset by animateFloatAsState(
+        targetValue = offsetX,
+        label = "dragAnimation"
+    )
+
+    Box(
+        modifier = modifier
+            .offset { IntOffset(animatedOffset.roundToInt(), 0) }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        if (offsetX <= -swipeThreshold) {
+                            onDragComplete()
+                        }
+                        offsetX = 0f
+                    },
+                    onDragCancel = {
+                        offsetX = 0f
+                    },
+                    onHorizontalDrag = { _, dragAmount ->
+                        val newOffset = offsetX + dragAmount
+                        // Restrict drag to left only (negative values)
+                        offsetX = newOffset.coerceIn(-swipeThreshold, 0f)
+                    }
+                )
+            }
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun getAnnotatedString(formattedText: TdApi.FormattedText): AnnotatedString {
+    return buildAnnotatedString {
+        formattedText.entities.forEach { entity ->
+            val start = entity.offset
+            val end = entity.offset + entity.length
+            val range = start until end
+            when (entity.type) {
+                is TdApi.TextEntityTypeTextUrl -> {
+                    addStyle(
+                        SpanStyle(
+                            color = MaterialTheme.colorScheme.primary
+                        ),
+                        start, end
+                    )
+                    addLink(
+                        url = LinkAnnotation.Url((entity.type as TdApi.TextEntityTypeTextUrl).url),
+                        start = start,
+                        end = end
+                    )
+                }
+
+                is TdApi.TextEntityTypeUrl -> {
+                    val url =
+                        formattedText.text.substring(
+                            start,
+                            end
+                        )
+                    addStyle(
+                        SpanStyle(
+                            color = MaterialTheme.colorScheme.primary,
+                            textDecoration = TextDecoration.Underline
+                        ),
+                        start, end
+                    )
+                    addLink(
+                        url = LinkAnnotation.Url(url),
+                        start = start,
+                        end = end
+                    )
+                }
+
+                is TdApi.TextEntityTypeSpoiler -> {
+                    addStyle(
+                        SpanStyle(
+                            background = MaterialTheme.colorScheme.onSurface,
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        start, end
+                    )
+                }
+
+                is TdApi.TextEntityTypeBold -> {
+                    addStyle(
+                        SpanStyle(fontWeight = FontWeight.Bold),
+                        start, end
+                    )
+                }
+
+                is TdApi.TextEntityTypeItalic -> {
+                    addStyle(
+                        SpanStyle(fontStyle = FontStyle.Italic),
+                        start, end
+                    )
+                }
+
+                is TdApi.TextEntityTypeCode -> {
+                    addStyle(
+                        SpanStyle(
+                            fontFamily = FontFamily.Monospace,
+                        ),
+                        start, end
+                    )
+                }
+
+                is TdApi.TextEntityTypePreCode -> {
+                    addStyle(
+                        SpanStyle(
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        start, end
+                    )
+                }
+
+                is TdApi.TextEntityTypeMention -> {
+                    addStyle(
+                        SpanStyle(color = MaterialTheme.colorScheme.primary),
+                        start, end
+                    )
+                }
+
+                is TdApi.TextEntityTypeHashtag -> {
+                    addStyle(
+                        SpanStyle(color = MaterialTheme.colorScheme.primary),
+                        start, end
+                    )
+                }
+
+                is TdApi.TextEntityTypeUnderline -> {
+                    addStyle(
+                        SpanStyle(textDecoration = TextDecoration.Underline),
+                        start, end
+                    )
+                }
+
+                is TdApi.TextEntityTypeStrikethrough -> {
+                    addStyle(
+                        SpanStyle(textDecoration = TextDecoration.LineThrough),
+                        start, end
+                    )
+                }
+
+                is TdApi.TextEntityTypeBlockQuote -> {
+                    addStyle(
+                        SpanStyle(
+                            fontStyle = FontStyle.Italic
+                        ),
+                        start, end
+                    )
+                }
+
+                is TdApi.TextEntityTypePre -> {
+                    addStyle(
+                        SpanStyle(
+                            fontFamily = FontFamily.Monospace
+                        ),
+                        start, end
+                    )
+                }
+            }
+        }
+        append(formattedText.text)
     }
 }

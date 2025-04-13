@@ -15,11 +15,14 @@ import android.webkit.MimeTypeMap
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.firebase.messaging.threads.ThreadPriority
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.loadChatDetails
 import com.xxcactussell.mategram.domain.entity.AuthState
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramCredentials
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.addFileToDownloads
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.downloadFile
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMe
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
@@ -54,6 +57,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.drinkless.tdlib.TdApi
 import org.drinkless.tdlib.TdApi.Chat
+import org.drinkless.tdlib.TdApi.File
 import java.io.FileInputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -63,6 +67,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = TelegramRepository
     private val _authState = MutableStateFlow<AuthState>(AuthState.Initial)
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
+
+    fun getMyString(id: Int): String {
+        return getApplication<Application>().getString(id)
+    }
 
     fun setAuthState(state: AuthState) {
         viewModelScope.launch {
@@ -288,6 +296,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             launch {
                 repository.chatPositionUpdate.collect { update ->
                     handleChatPosition(update)
+                }
+            }
+            launch {
+                repository.fileUpdateFLow.collect { update ->
+                    handleFileUpdate(update)
                 }
             }
         }
@@ -529,6 +542,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
             api.sendMessage(chatId, 0, replyToMessageId, null, null, inputMessage)
         }
+    }
+
+    suspend fun downloadVideo(file: TdApi.File): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val downloadedFile = api.downloadFile(file.id, 32, 0, 0, false)
+                downloadedFile.local.path.takeIf { it.isNotEmpty() }
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    private var _downloadedFiles = MutableStateFlow<MutableMap<Int, TdApi.File?>>(mutableMapOf())
+    var downloadedFiles: StateFlow<MutableMap<Int, TdApi.File?>> = _downloadedFiles
+
+    private fun handleFileUpdate(update: TdApi.UpdateFile) {
+        viewModelScope.launch {
+            val file = update.file
+
+            _downloadedFiles.update { currentMap ->
+                currentMap.toMutableMap().apply { this[file.id] = file }
+            }
+        }
+    }
+
+
+    suspend fun addFileToDownloads(file: TdApi.File, chatId: Long, messageId: Long, priority: Int = 1) {
+        api.addFileToDownloads(file.id, chatId, messageId, priority)
     }
 
     suspend fun downloadFileToDownloads(context: Context, fileId: Int, fileName: String = "document.pdf"): Uri? {

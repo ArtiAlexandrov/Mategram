@@ -13,8 +13,7 @@ import org.drinkless.tdlib.TdApi
 /**
  * emits [File] if information about a file was updated.
  */
-fun TelegramFlow.fileFlow(): Flow<TdApi.File> = this.getUpdatesFlowOfType<TdApi.UpdateFile>()
-    .mapNotNull { it.file }
+fun TelegramFlow.fileFlow(): Flow<TdApi.UpdateFile> = this.getUpdatesFlowOfType<TdApi.UpdateFile>()
 
 /**
  * emits [UpdateFileGenerationStart] if the file generation process needs to be started by the
