@@ -36,6 +36,7 @@ import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
@@ -77,6 +78,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.motionEventSpy
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -106,6 +108,7 @@ import org.drinkless.tdlib.TdApi
 import org.drinkless.tdlib.TdApi.MessagePhoto
 import org.drinkless.tdlib.TdApi.MessageText
 import org.drinkless.tdlib.TdApi.MessageVideo
+import kotlin.coroutines.CoroutineContext
 
 @OptIn(
     ExperimentalMaterial3AdaptiveApi::class,
@@ -471,7 +474,6 @@ fun ChatListView(
             )
         }
     )
-
     LaunchedEffect(Unit) {
         viewModel.navigationEvent.collect { chatId ->
             navigator.navigateTo(ThreePaneScaffoldRole.Primary, chatId)

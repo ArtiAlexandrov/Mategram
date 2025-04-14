@@ -128,10 +128,10 @@ fun ChatImageViewer(
         BackHandler(enabled = true) {
             onDismiss()
         }
-        val systemBars =
-            WindowInsetsCompat.toWindowInsetsCompat(window.decorView.rootWindowInsets)
-        WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars =
-            false
+//        val systemBars =
+//            WindowInsetsCompat.toWindowInsetsCompat(window.decorView.rootWindowInsets)
+//        WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars =
+//            false
         WindowCompat.setDecorFitsSystemWindows(window, false)
         Box(
             modifier = Modifier
