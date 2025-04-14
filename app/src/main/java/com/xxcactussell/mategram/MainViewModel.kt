@@ -59,9 +59,11 @@ import kotlinx.coroutines.withContext
 import org.drinkless.tdlib.TdApi
 import org.drinkless.tdlib.TdApi.Chat
 import org.drinkless.tdlib.TdApi.File
+import java.io.ByteArrayOutputStream
 import java.io.FileInputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.zip.GZIPInputStream
 
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -413,67 +415,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    suspend fun getChatAvatarPath(chat: Chat, size: String = "s"): String? {
-        val avatarFileId: Int? = if (size == "s") {
-            chat.photo?.small?.id
-        } else {
-            chat.photo?.big?.id
-        }
-
-        if (avatarFileId != null) {
-            val file = TelegramRepository.getFile(avatarFileId)
-            if (!file.local.isDownloadingCompleted) {
-                ensureFileDownload(avatarFileId)
-                // Ждём завершения загрузки
-                while (!TelegramRepository.getFile(avatarFileId).local.isDownloadingCompleted) {
-                    delay(100)
-                }
-                // Получаем обновлённый файл
-                return TelegramRepository.getFile(avatarFileId).local.path
-            }
-            return file.local.path
-        }
-        return null
-    }
-
-    suspend fun getStickerFromChat(stickerFile: TdApi.File?): String? {
-        var file = stickerFile
-        if (file != null && !file.local.isDownloadingCompleted) {
-            println("Стикер не загружен, запускаем загрузку...")
-            ensureFileDownload(file.id)
-
-            // Добавляем ожидание загрузки
-            file = awaitFileDownload(file.id)
-        }
-        if (file != null) {
-            return file.local?.path
-        }
-        return null
-    }
-
-    private suspend fun awaitFileDownload(fileId: Int): TdApi.File {
-        while (true) {
-            val file = TelegramRepository.getFile(fileId)
-            if (file.local.isDownloadingCompleted) {
-                return file
-            }
-            delay(500) // Ожидание перед повторной проверкой
-        }
-    }
-
-
-    private fun ensureFileDownload(fileId: Int) {
-        viewModelScope.launch {
-            val downloadRequest = TdApi.DownloadFile(fileId, 32, 0, 0, false)
-            api.client?.send(downloadRequest) { result ->
-                if (result is TdApi.File) {
-                    println("Загрузка файла начата: ${result.id}")
-                } else if (result is TdApi.Error) {
-                    println("Ошибка загрузки файла: ${result.message}")
-                }
-            }
-        }
-    }
 
     fun sendMessage(chatId: Long, text: String, replyToMessageId: TdApi.InputMessageReplyTo? = null) {
         viewModelScope.launch {
@@ -534,6 +475,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return filePath.endsWith(".apk") || getMimeType(filePath) == "application/vnd.android.package-archive"
     }
 
+    fun decompressTgs(filePath: String): String {
+        val file = java.io.File(filePath)
+        val inputStream = GZIPInputStream(FileInputStream(file))
+        val outputStream = ByteArrayOutputStream()
+
+        val buffer = ByteArray(1024)
+        var length: Int
+        while (inputStream.read(buffer).also { length = it } != -1) {
+            outputStream.write(buffer, 0, length)
+        }
+
+        inputStream.close()
+        return outputStream.toString(Charsets.UTF_8) // Возвращаем JSON строку
+    }
 
     suspend fun markAsRead(message: TdApi.Message) {
         println("Отмечаем сообщение ${message.id} как прочитанное в чате ${message.chatId}")

@@ -15,6 +15,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,10 +36,23 @@ fun ChatInfoContent(
     modifier: Modifier = Modifier,
     viewModel: MainViewModel = viewModel(),
 ) {
+    val photo = chat.photo?.big
+    val downloadedFiles by viewModel.downloadedFiles.collectAsState()
+    var avatarPath by remember { mutableStateOf(downloadedFiles[chat.photo?.big?.id]?.local?.path) }
 
-    var avatarPath by remember { mutableStateOf<String?>("") }
-    LaunchedEffect(chat.photo) {
-        avatarPath = viewModel.getChatAvatarPath(chat, "b")
+    LaunchedEffect(photo) {
+        if (photo?.local?.isDownloadingCompleted == false) {
+            viewModel.downloadFile(chat.photo?.big)
+        } else {
+            avatarPath = photo?.local?.path
+        }
+    }
+
+    LaunchedEffect(downloadedFiles.values) {
+        val downloadedFile = downloadedFiles[photo?.id]
+        if (downloadedFile?.local?.isDownloadingCompleted == true) {
+            avatarPath = downloadedFile.local?.path
+        }
     }
     Column(
         modifier = modifier

@@ -117,8 +117,10 @@ fun ChatListView(
     window: Window
 ) {
     val me by viewModel.me.collectAsState()
-    var avatarMePath by remember { mutableStateOf<String?>("") }
+    val downloadedFiles by viewModel.downloadedFiles.collectAsState()
     var chatMe by remember { mutableStateOf<TdApi.Chat?>(null) }
+    val photo = chatMe?.photo?.small
+    var avatarMePath by remember { mutableStateOf(downloadedFiles[chatMe?.photo?.small?.id]?.local?.path) }
     val chats by viewModel.visibleChats.collectAsState()
     val folders by viewModel.chatFolders.collectAsState()
     var selectedChat by remember { mutableStateOf<TdApi.Chat?>(null) }
@@ -132,7 +134,21 @@ fun ChatListView(
     LaunchedEffect(me) {
         if (me!=null) {
             chatMe = api.createPrivateChat(me!!.id, true)
-            avatarMePath = viewModel.getChatAvatarPath(chatMe!!)
+        }
+    }
+
+    LaunchedEffect(photo) {
+        if (photo?.local?.isDownloadingCompleted == false) {
+            viewModel.downloadFile(chatMe?.photo?.small)
+        } else {
+            avatarMePath = photo?.local?.path
+        }
+    }
+
+    LaunchedEffect(downloadedFiles.values) {
+        val downloadedFile = downloadedFiles[photo?.id]
+        if (downloadedFile?.local?.isDownloadingCompleted == true) {
+            avatarMePath = downloadedFile.local?.path
         }
     }
 
@@ -364,6 +380,7 @@ fun ChatListView(
                                         isSelected = chat.id == selectedChatId,
                                         onChatClick = {
                                             scope.launch {
+                                                api.openChat(chat.id)
                                                 navigator.navigateTo(
                                                     ListDetailPaneScaffoldRole.Detail,
                                                     chat.id
@@ -384,6 +401,7 @@ fun ChatListView(
                                         isSelected = chat.id == selectedChatId,
                                         onChatClick = {
                                             scope.launch {
+                                                api.openChat(chat.id)
                                                 navigator.navigateTo(
                                                     ListDetailPaneScaffoldRole.Detail,
                                                     chat.id
@@ -503,7 +521,6 @@ private fun ChatItem(
             .clip(RoundedCornerShape(24.dp))
             .clickable {
                 scope.launch{
-                    api.openChat(chat.id)
                     onChatClick(chat.id)
                 }
             },

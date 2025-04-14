@@ -117,6 +117,10 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.IntOffset
 import androidx.core.content.FileProvider
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.animateLottieCompositionAsState
+import com.airbnb.lottie.compose.rememberLottieComposition
 import com.xxcactussell.mategram.getMimeType
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
 import org.drinkless.tdlib.TdApi.MessageDocument
@@ -150,18 +154,29 @@ fun ChatDetailPane(
     }.collectAsState()
     var groupedMessages = groupMessagesByAlbum(messagesForChat)
     val listState = rememberLazyListState()
-    var avatarPath by remember { mutableStateOf<String?>(null) }
+    val downloadedFiles by viewModel.downloadedFiles.collectAsState()
+    val photo = chat?.photo?.small
+    var avatarPath by remember { mutableStateOf(downloadedFiles[chat?.photo?.small?.id]?.local?.path) }
     var inputMessageToReply by remember { mutableStateOf<TdApi.InputMessageReplyTo?>(null) }
     var messageIdToReply by remember { mutableStateOf<Long?>(null) }
     var messageTextToReply by remember { mutableStateOf<String?>(null) }
     var senderNameForReply by remember { mutableStateOf<String?>(null) }
     var selectedMessageId by remember { mutableStateOf<Long?>(null) }
-    val downloadedFiles by viewModel.downloadedFiles.collectAsState()
 
-    LaunchedEffect(chat) {
-        avatarPath = chat?.let { viewModel.getChatAvatarPath(it) }
+    LaunchedEffect(photo) {
+        if (photo?.local?.isDownloadingCompleted == false) {
+            viewModel.downloadFile(chat?.photo?.small)
+        } else {
+            avatarPath = photo?.local?.path
+        }
     }
 
+    LaunchedEffect(downloadedFiles.values) {
+        val downloadedFile = downloadedFiles[photo?.id]
+        if (downloadedFile?.local?.isDownloadingCompleted == true) {
+            avatarPath = downloadedFile.local?.path
+        }
+    }
 
     var isLoadingMore by remember { mutableStateOf(false) }
 
@@ -526,19 +541,19 @@ fun ChatDetailPane(
                                                 }
                                             }
                                             is MessagePhoto -> {
-                                                val photo = content.photo?.sizes?.lastOrNull()?.photo
+                                                val photoInChat = content.photo?.sizes?.lastOrNull()?.photo
                                                 var photoPath by remember { mutableStateOf(photo?.local?.path) }
 
-                                                LaunchedEffect(photo) {
-                                                    if (photo?.local?.isDownloadingCompleted == false) {
-                                                        viewModel.downloadFile(photo)
+                                                LaunchedEffect(photoInChat) {
+                                                    if (photoInChat?.local?.isDownloadingCompleted == false) {
+                                                        viewModel.downloadFile(photoInChat)
                                                     } else {
-                                                        photoPath = photo?.local?.path
+                                                        photoPath = photoInChat?.local?.path
                                                     }
                                                 }
 
                                                 LaunchedEffect(downloadedFiles.values) {
-                                                    val downloadedFile = downloadedFiles[photo?.id]
+                                                    val downloadedFile = downloadedFiles[photoInChat?.id]
                                                     if (downloadedFile?.local?.isDownloadingCompleted == true) {
                                                         photoPath = downloadedFile.local?.path
                                                     }
@@ -587,7 +602,7 @@ fun ChatDetailPane(
                                                     val documentThumbnail = content.document.thumbnail?.file
                                                     var documentThumbnailPath by remember { mutableStateOf(documentThumbnail?.local?.path) }
                                                     val documentName = content.document?.fileName.toString()
-                                                    var uploadedSize by remember { mutableStateOf<String?>(formatFileSize(document?.expectedSize?.toInt() ?: 0)) }
+                                                    val uploadedSize by remember { mutableStateOf<String?>(formatFileSize(document?.expectedSize?.toInt() ?: 0)) }
                                                     var isDownloading by remember { mutableStateOf(false) }
                                                     var isFileDownloaded by remember { mutableStateOf(false) }
 
@@ -755,53 +770,69 @@ fun ChatDetailPane(
                                                 }
                                             }
                                             is MessageSticker -> {
-                                                val sticker = (item.content as MessageSticker).sticker
+                                                val sticker = content.sticker
                                                 val stickerFile = sticker?.sticker
                                                 var stickerPath by remember { mutableStateOf<String?>(null) }
 
-                                                LaunchedEffect(stickerFile) {
-                                                    stickerPath =
-                                                        viewModel.getStickerFromChat(stickerFile)
+                                                LaunchedEffect (stickerFile) {
+                                                    if (stickerFile?.local?.isDownloadingCompleted == false) {
+                                                        viewModel.addFileToDownloads(stickerFile, chatId, messageId)
+                                                    } else {
+                                                        stickerPath = stickerFile?.local?.path
+                                                    }
+                                                }
+
+                                                LaunchedEffect(downloadedFiles.values) {
+                                                    val downloadedFile = downloadedFiles[stickerFile?.id]
+                                                    if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                                                        stickerPath = downloadedFile.local?.path
+                                                    }
                                                 }
 
                                                 if (stickerPath != null) {
-                                                    if (stickerPath!!.endsWith(".webp")) {
-                                                        // Если формат WebP — используем AsyncImage
-                                                        AsyncImage(
-                                                            model = stickerPath,
-                                                            contentDescription = "Стикер",
-                                                            contentScale = ContentScale.Fit,
-                                                            modifier = Modifier
-                                                                .size(200.dp)
-                                                                .clip(RoundedCornerShape(24.dp))
-                                                        )
-                                                    } else {
-                                                        // Если формат WebM — используем VideoView
-                                                        AndroidView(
-                                                            factory = { context ->
-                                                                PlayerView(context).apply {
-                                                                    val player =
-                                                                        ExoPlayer.Builder(context)
-                                                                            .build()
-                                                                    this.player = player
-                                                                    val mediaItem =
-                                                                        MediaItem.fromUri(stickerPath!!)
+                                                    when(sticker.format) {
+                                                        is TdApi.StickerFormatWebp -> {
+                                                            AsyncImage(
+                                                                model = stickerPath,
+                                                                contentDescription = "Стикер",
+                                                                contentScale = ContentScale.Fit,
+                                                                modifier = Modifier
+                                                                    .size(200.dp)
+                                                                    .clip(RoundedCornerShape(24.dp))
+                                                            )
+                                                        }
+                                                        is TdApi.StickerFormatWebm -> {
+                                                            AndroidView(
+                                                                factory = { context ->
+                                                                    PlayerView(context).apply {
+                                                                        val player = ExoPlayer.Builder(context).build()
+                                                                        this.player = player
+                                                                        val mediaItem = MediaItem.fromUri(stickerPath!!)
+                                                                        player.setMediaItem(mediaItem)
+                                                                        player.repeatMode = Player.REPEAT_MODE_ALL
+                                                                        player.prepare()
+                                                                        player.play()
+                                                                        this.useController = false
+                                                                    }
+                                                                },
+                                                                modifier = Modifier
+                                                                    .size(200.dp)
+                                                                    .clip(RoundedCornerShape(24.dp))
+                                                            )
+                                                        }
+                                                        is TdApi.StickerFormatTgs -> {
+                                                            val tgsJson = viewModel.decompressTgs(stickerPath!!)
+                                                            val composition by rememberLottieComposition(LottieCompositionSpec.JsonString(tgsJson))
+                                                            val progress by animateLottieCompositionAsState(composition)
 
-                                                                    player.setMediaItem(mediaItem)
-                                                                    player.repeatMode =
-                                                                        Player.REPEAT_MODE_ALL // Зацикливаем воспроизведение
-                                                                    player.prepare()
-                                                                    player.play()
-
-                                                                    // Убираем элементы управления
-                                                                    this.useController = false
-                                                                }
-                                                            },
-                                                            modifier = Modifier
-                                                                .size(200.dp)
-                                                                .clip(RoundedCornerShape(24.dp))
-                                                        )
-
+                                                            LottieAnimation(
+                                                                composition = composition,
+                                                                iterations = Int.MAX_VALUE,
+                                                                modifier = Modifier
+                                                                    .size(200.dp)
+                                                                    .clip(RoundedCornerShape(24.dp))
+                                                            )
+                                                        }
                                                     }
                                                 } else {
                                                     Box(
