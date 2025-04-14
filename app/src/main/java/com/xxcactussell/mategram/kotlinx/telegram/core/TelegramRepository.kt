@@ -20,7 +20,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.launch
-import kotlinx.telegram.extensions.ChatKtx
+import com.xxcactussell.mategram.kotlinx.telegram.extensions.ChatKtx
 import com.xxcactussell.mategram.kotlinx.telegram.extensions.UserKtx
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatAddedToListFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatDraftMessageFlow
@@ -31,7 +31,7 @@ import com.xxcactussell.mategram.kotlinx.telegram.flows.newChatFlow
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.telegram.flows.fileFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.fileFlow
 import org.drinkless.tdlib.TdApi
 import org.drinkless.tdlib.TdApi.Message
 import java.text.SimpleDateFormat
@@ -39,7 +39,7 @@ import java.util.Date
 import java.util.Locale
 
 object TelegramRepository : UserKtx, ChatKtx {
-    val coroutineScope = CoroutineScope(Dispatchers.Default)
+    private val coroutineScope = CoroutineScope(Dispatchers.Default)
     val chatUpdatesScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override val api: TelegramFlow = TelegramFlow()

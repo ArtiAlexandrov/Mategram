@@ -2,7 +2,7 @@ package com.xxcactussell.mategram.ui.chat
 
 import android.annotation.SuppressLint
 import android.view.Window
-import android.view.WindowInsets
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -23,6 +23,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -35,7 +36,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -52,8 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
@@ -73,7 +72,7 @@ import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 import kotlin.math.abs
 
-
+@SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,7 +83,7 @@ fun ChatImageViewer(
     viewModel: MainViewModel,
     onDismiss: () -> Unit
 ) {
-    window.insetsController?.hide(WindowInsets.Type.systemBars())
+    val downloadedFiles by viewModel.downloadedFiles.collectAsState()
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     val state = rememberTransformableState { zoomChange, offsetChange, _ ->
@@ -102,27 +101,67 @@ fun ChatImageViewer(
         message = api.getMessage(chatId, messageId)
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    Scaffold(
+        modifier = Modifier
+            .fillMaxSize(),
+        topBar = {
+            TopAppBar(
+                modifier = Modifier.graphicsLayer {
+                    alpha = backgroundAlpha
+                },
+                title = { },
+                navigationIcon = {
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            painterResource(R.drawable.baseline_close_24),
+                            contentDescription = "Close",
+                            tint = Color.White
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent
+                )
+            )
+        }
+    ) { innerPadding ->
+        BackHandler(enabled = true) {
+            onDismiss()
+        }
+        val systemBars =
+            WindowInsetsCompat.toWindowInsetsCompat(window.decorView.rootWindowInsets)
+        WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars =
+            false
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = backgroundAlpha))
-        ) { message?.let { msg ->
+        ) {
+            message?.let { msg ->
                 when (msg.content) {
                     is TdApi.MessagePhoto -> {
-                        val photoSize = (msg.content as TdApi.MessagePhoto)
-                            .photo?.sizes?.maxByOrNull { it.width * it.height }
-                        var imagePath by remember { mutableStateOf<String?>(null) }
+                        val photo = (msg.content as TdApi.MessagePhoto)
+                            .photo?.sizes?.maxByOrNull { it.width * it.height }?.photo
+                        var photoPath by remember { mutableStateOf(photo?.local?.path) }
 
-                        // Add LaunchedEffect to load the image path
-                        LaunchedEffect(photoSize) {
-                            imagePath = viewModel.getPhotoPreviewFromChat(photoSize)
+                        LaunchedEffect(photo) {
+                            if (photo?.local?.isDownloadingCompleted == false) {
+                                viewModel.downloadFile(photo)
+                            } else {
+                                photoPath = photo?.local?.path
+                            }
                         }
+
+                        LaunchedEffect(downloadedFiles.values) {
+                            val downloadedFile = downloadedFiles[photo?.id]
+                            if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                                photoPath = downloadedFile.local?.path
+                            }
+                        }
+
                         SubcomposeAsyncImage(
-                            model = imagePath,
+                            model = photoPath,
                             contentDescription = "Full size photo",
                             modifier = Modifier
                                 .fillMaxSize()
@@ -172,9 +211,10 @@ fun ChatImageViewer(
                         val controlsTimer = remember { mutableStateOf<Job?>(null) }
                         val scope = rememberCoroutineScope()
                         val context = LocalContext.current
-                        val downloadedFiles by viewModel.downloadedFiles.collectAsState()
-                        val downloadedSize = downloadedFiles[video.video.id]?.local?.downloadedSize ?: 0L
-                        val downloadProgress = downloadedSize.toFloat() / video.video.expectedSize.toFloat()
+                        val downloadedSize =
+                            downloadedFiles[video.video.id]?.local?.downloadedSize ?: 0L
+                        val downloadProgress =
+                            downloadedSize.toFloat() / video.video.expectedSize.toFloat()
 
                         val exoPlayer = remember {
                             ExoPlayer.Builder(context).build().apply {
@@ -240,7 +280,7 @@ fun ChatImageViewer(
                                         player = exoPlayer
                                         useController = false
                                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                                        setBackgroundColor(Color.Black.toArgb())
+                                        setBackgroundColor(Color.Transparent.toArgb())
                                     }
                                 },
                                 modifier = Modifier.fillMaxSize()
@@ -259,20 +299,20 @@ fun ChatImageViewer(
                                         trackColor = Color.White.copy(alpha = 0.3f),
                                     )
                                 }
+                            } else {
+                                VideoControls(
+                                    exoPlayer = exoPlayer,
+                                    isPlaying = isPlaying,
+                                    isControlsVisible = isControlsVisible,
+                                    onPlayPauseClick = {
+                                        isPlaying = !isPlaying
+                                        if (isControlsVisible) {
+                                            hideControlsAfterDelay()
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxSize()
+                                )
                             }
-
-                            VideoControls(
-                                exoPlayer = exoPlayer,
-                                isPlaying = isPlaying,
-                                isControlsVisible = isControlsVisible,
-                                onPlayPauseClick = {
-                                    isPlaying = !isPlaying
-                                    if (isControlsVisible) {
-                                        hideControlsAfterDelay()
-                                    }
-                                },
-                                modifier = Modifier.fillMaxSize()
-                            )
                         }
 
                         DisposableEffect(Unit) {
@@ -284,26 +324,9 @@ fun ChatImageViewer(
                     }
                 }
             }
-            TopAppBar(
-                modifier = Modifier.graphicsLayer {
-                    alpha = backgroundAlpha
-                },
-                title = { },
-                navigationIcon = {
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            painterResource(R.drawable.baseline_close_24),
-                            contentDescription = "Close",
-                            tint = Color.White
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent
-                )
-            )
         }
     }
+
 }
 
 @SuppressLint("DefaultLocale")

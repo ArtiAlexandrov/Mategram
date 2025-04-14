@@ -13,15 +13,16 @@ import android.provider.MediaStore
 import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.core.app.NotificationCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.firebase.messaging.threads.ThreadPriority
-import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
-import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.loadChatDetails
 import com.xxcactussell.mategram.domain.entity.AuthState
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramCredentials
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.loadChatDetails
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.addFileToDownloads
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.cancelDownloadFile
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.downloadFile
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMe
@@ -97,20 +98,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             Log.d("MainViewModel", "Setting TDLib parameters...")
                             try {
                                 api.setTdlibParameters(
-                                    TelegramCredentials.useTestDc,
+                                    TelegramCredentials.USE_TEST_DC,
                                     TelegramCredentials.databaseDirectory,
                                     TelegramCredentials.filesDirectory,
                                     TelegramCredentials.encryptionKey,
-                                    TelegramCredentials.useFileDatabase,
-                                    TelegramCredentials.useChatInfoDatabase,
-                                    TelegramCredentials.useMessageDatabase,
-                                    TelegramCredentials.useSecretChats,
-                                    TelegramCredentials.apiId,
-                                    TelegramCredentials.apiHash,
+                                    TelegramCredentials.USE_FILE_DATABASE,
+                                    TelegramCredentials.USE_CHAT_INFO_DATABASE,
+                                    TelegramCredentials.USE_MESSAGE_DATABASE,
+                                    TelegramCredentials.USE_SECRET_CHATS,
+                                    TelegramCredentials.API_ID,
+                                    TelegramCredentials.API_HASH,
                                     TelegramCredentials.systemLanguageCode,
                                     TelegramCredentials.deviceModel,
                                     TelegramCredentials.systemVersion,
-                                    TelegramCredentials.applicationVersion
+                                    TelegramCredentials.APPLICATION_VERSION
                                 )
                                 Log.d("MainViewModel", "TDLib parameters set successfully")
                             } catch (e: Exception) {
@@ -412,15 +413,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private val _avatarPaths = MutableStateFlow<Map<Long, String?>>(emptyMap())
-    private val fileIdToChatId = mutableMapOf<Int, Long>()
-
     suspend fun getChatAvatarPath(chat: Chat, size: String = "s"): String? {
-        var avatarFileId: Int? = null
-        if (size == "s") {
-            avatarFileId = chat.photo?.small?.id
+        val avatarFileId: Int? = if (size == "s") {
+            chat.photo?.small?.id
         } else {
-            avatarFileId = chat.photo?.big?.id
+            chat.photo?.big?.id
         }
 
         if (avatarFileId != null) {
@@ -435,51 +432,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 return TelegramRepository.getFile(avatarFileId).local.path
             }
             return file.local.path
-        }
-        return null
-    }
-
-    suspend fun getDocumentThumbnail(documentThumbnail: TdApi.Thumbnail): String? {
-        var file = TelegramRepository.getFile(documentThumbnail.file.id)
-        if (!file.local.isDownloadingCompleted) {
-            println("Файл не загружен, запускаем загрузку...")
-            ensureFileDownload(documentThumbnail.file.id)
-
-            // Добавляем ожидание загрузки
-            file = awaitFileDownload(documentThumbnail.file.id)
-        }
-
-        return file.local?.path
-    }
-
-    suspend fun getPhotoPreviewFromChat(photoSize: TdApi.PhotoSize?): String? {
-        if (photoSize != null) {
-            var file = photoSize.photo?.let { TelegramRepository.getFile(it.id) }
-
-            if (file != null && !file.local.isDownloadingCompleted) {
-                println("Файл не загружен, запускаем загрузку...")
-                ensureFileDownload(photoSize.photo.id)
-
-                // Добавляем ожидание загрузки
-                file = awaitFileDownload(photoSize.photo.id)
-            }
-
-            return file?.local?.path
-        }
-        return null
-    }
-
-    suspend fun getThumbnailVideoFromChat(videoFile: TdApi.File?): String? {
-        if (videoFile != null) {
-            var file = videoFile
-            if (!file.local.isDownloadingCompleted) {
-                println("Файл не загружен, запускаем загрузку...")
-                ensureFileDownload(videoFile.id)
-
-                // Добавляем ожидание загрузки
-                file = awaitFileDownload(videoFile.id)
-            }
-            return file.local?.path
         }
         return null
     }
@@ -523,16 +475,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun updateAvatarPath(chatId: Long, path: String?) {
-        _avatarPaths.value = _avatarPaths.value.toMutableMap().apply {
-            this[chatId] = path
-        }
-    }
-
-    private fun findChatIdByFileId(fileId: Int): Long? {
-        return fileIdToChatId[fileId]
-    }
-
     fun sendMessage(chatId: Long, text: String, replyToMessageId: TdApi.InputMessageReplyTo? = null) {
         viewModelScope.launch {
             val inputMessage = TdApi.InputMessageText(
@@ -544,16 +486,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    suspend fun downloadVideo(file: TdApi.File): String? {
-        return withContext(Dispatchers.IO) {
-            try {
-                val downloadedFile = api.downloadFile(file.id, 32, 0, 0, false)
-                downloadedFile.local.path.takeIf { it.isNotEmpty() }
-            } catch (e: Exception) {
-                null
-            }
-        }
-    }
 
     private var _downloadedFiles = MutableStateFlow<MutableMap<Int, TdApi.File?>>(mutableMapOf())
     var downloadedFiles: StateFlow<MutableMap<Int, TdApi.File?>> = _downloadedFiles
@@ -568,97 +500,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    suspend fun downloadFile(file: TdApi.File?, priority: Int = 32) {
+        if (file != null) {
+            api.downloadFile(file.id, priority, 0, 0, false)
+        }
+    }
 
-    suspend fun addFileToDownloads(file: TdApi.File, chatId: Long, messageId: Long, priority: Int = 1) {
+    suspend fun cancelFileDownload(file: File?) {
+        if (file != null) {
+            api.cancelDownloadFile(file.id, false)
+        }
+    }
+
+    suspend fun addFileToDownloads(file: TdApi.File, chatId: Long, messageId: Long, priority: Int = 32) {
         api.addFileToDownloads(file.id, chatId, messageId, priority)
     }
 
-    suspend fun downloadFileToDownloads(context: Context, fileId: Int, fileName: String = "document.pdf"): Uri? {
-        return withContext(Dispatchers.IO) {
-            val channelId = "download_channel"
-            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    fun installApk(context: Context, apkPath: String) {
+        val apkUri = FileProvider.getUriForFile(context, "${context.packageName}.provider",
+            java.io.File(apkPath)
+        )
 
-            // Создаём канал уведомлений (Android 8+)
-            val channel = NotificationChannel(
-                channelId,
-                "Загрузка файла",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            notificationManager.createNotificationChannel(channel)
-
-            val notificationBuilder = NotificationCompat.Builder(context, channelId)
-                .setSmallIcon(android.R.drawable.stat_sys_download)
-                .setContentTitle(fileName)
-                .setProgress(100, 0, true)
-                .setOngoing(true)
-
-            notificationManager.notify(fileId, notificationBuilder.build())
-
-            // Запускаем загрузку файла
-            ensureFileDownload(fileId)
-            println("Запуск загрузки файла...")
-
-            // Ожидаем завершения загрузки
-            val downloadedFile = awaitFileDownload(fileId)
-            if (!downloadedFile.local.isDownloadingCompleted) {
-                println("Ошибка: файл не был загружен.")
-                notificationManager.cancel(fileId)
-                return@withContext null
-            }
-
-            // Определяем MIME-тип файла
-            val mimeType = getMimeType(fileName)
-
-            // Используем MediaStore API для сохранения файла в `Downloads`
-            val contentValues = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                put(MediaStore.Downloads.MIME_TYPE, mimeType)
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-            }
-
-            val resolver = context.contentResolver
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-
-            uri?.let {
-                resolver.openOutputStream(it).use { outputStream ->
-                    FileInputStream(downloadedFile.local.path).use { inputStream ->
-                        inputStream.copyTo(outputStream!!)
-                    }
-                }
-                println("Файл сохранён в Downloads: $uri")
-
-                // ✅ **Создаём Intent для открытия файла**
-                val openFileIntent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, mimeType)
-                    flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
-                }
-
-                val pendingIntent = PendingIntent.getActivity(
-                    context,
-                    0,
-                    openFileIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-
-                // ✅ **Уведомление о завершении загрузки**
-                notificationBuilder
-                    .setSmallIcon(R.drawable.baseline_download_done_24)
-                    .setContentText("Файл $fileName загружен! Нажмите, чтобы открыть")
-                    .setProgress(0, 0, false)
-                    .setContentIntent(pendingIntent)
-                    .setAutoCancel(true)
-                    .setOngoing(false)
-
-                notificationManager.notify(fileId, notificationBuilder.build())
-
-                return@withContext uri
-            }
-
-            println("Ошибка сохранения файла.")
-            notificationManager.cancel(fileId)
-            return@withContext null
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(apkUri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
+
+        context.startActivity(intent) // Запускаем установку APK
     }
+
+    fun isApkFile(filePath: String): Boolean {
+        return filePath.endsWith(".apk") || getMimeType(filePath) == "application/vnd.android.package-archive"
+    }
+
 
     suspend fun markAsRead(message: TdApi.Message) {
         println("Отмечаем сообщение ${message.id} как прочитанное в чате ${message.chatId}")
@@ -704,12 +579,11 @@ fun getMimeType(fileName: String): String {
 
 class NotificationViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val NotificationHelper = com.xxcactussell.mategram.notifications.NotificationHelper
+    private val notificationHelper = com.xxcactussell.mategram.notifications.NotificationHelper
 
     private var notificationJob: Job? = null
     private val jobLock = AtomicBoolean(false)
     private val _isObservingNotifications = MutableStateFlow(false)
-    val isObservingNotifications = _isObservingNotifications.asStateFlow()
 
     fun startObservingNotifications() {
         if (!jobLock.compareAndSet(false, true)) {
@@ -824,15 +698,15 @@ class NotificationViewModel(application: Application) : AndroidViewModel(applica
                     var senderName = ""
                     var title = ""
                     var chatPhoto: TdApi.File? = null
-                    var isChannelPost = message.isChannelPost
+                    val isChannelPost = message.isChannelPost
                     when (val sender = message.senderId) {
                         is TdApi.MessageSenderUser -> {
                             val user = api.getUser(sender.userId)
                             chatPhoto = user.profilePhoto?.small
-                            if (chat.type is TdApi.ChatTypeBasicGroup || chat.type is TdApi.ChatTypeSupergroup) {
-                                title = chat.title
+                            title = if (chat.type is TdApi.ChatTypeBasicGroup || chat.type is TdApi.ChatTypeSupergroup) {
+                                chat.title
                             } else {
-                                title = "${chat.unreadCount} новых сообщений"
+                                "${chat.unreadCount} новых сообщений"
                             }
                             senderName = user.firstName + " " + user.lastName
                             Log.d("NotificationDebug", "Received message from user: ${user.firstName} ${user.lastName}")
@@ -871,7 +745,7 @@ class NotificationViewModel(application: Application) : AndroidViewModel(applica
                             chatSettings?.useDefault == false -> chatSettings.showPreview
                             else -> scopeSettings?.showPreview ?: true
                         }
-                        NotificationHelper.showMessageNotification(
+                        notificationHelper.showMessageNotification(
                             context = getApplication(),
                             chatId = chat.id,
                             chatTitle = title,

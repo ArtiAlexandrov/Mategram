@@ -5,21 +5,6 @@
 package com.xxcactussell.mategram.kotlinx.telegram.extensions
 
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramFlow
-import kotlinx.telegram.extensions.ChatKtx
-import kotlinx.telegram.extensions.CommonKtx
-import kotlinx.telegram.extensions.FileKtx
-import kotlinx.telegram.extensions.GiftKtx
-import kotlinx.telegram.extensions.GroupCallKtx
-import kotlinx.telegram.extensions.MessageKtx
-import kotlinx.telegram.extensions.NotificationGroupKtx
-import kotlinx.telegram.extensions.NotificationSoundKtx
-import kotlinx.telegram.extensions.ProfileAccentColorKtx
-import kotlinx.telegram.extensions.ProxyKtx
-import kotlinx.telegram.extensions.SavedMessagesTopicKtx
-import kotlinx.telegram.extensions.SecretChatKtx
-import kotlinx.telegram.extensions.SessionKtx
-import kotlinx.telegram.extensions.StoryKtx
-import kotlinx.telegram.extensions.SupergroupKtx
 
 /**
  * Interface for access all Telegram objects extension functions. Contains 454 extensions

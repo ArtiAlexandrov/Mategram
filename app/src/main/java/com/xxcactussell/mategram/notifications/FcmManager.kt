@@ -8,7 +8,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
-class FcmManager(private val context: Context) {
+class FcmManager(context: Context) {
     private val prefs = context.getSharedPreferences("fcm_prefs", Context.MODE_PRIVATE)
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 

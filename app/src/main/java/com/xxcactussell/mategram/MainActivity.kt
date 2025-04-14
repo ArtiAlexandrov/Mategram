@@ -57,8 +57,7 @@ import org.drinkless.tdlib.TdApi
 
 
 class MainActivity : ComponentActivity() {
-    lateinit var fcmManager: FcmManager
-        private set
+    private lateinit var fcmManager: FcmManager
     private var pendingChatId: Long? = null
     private val viewModel by viewModels<MainViewModel>()
 

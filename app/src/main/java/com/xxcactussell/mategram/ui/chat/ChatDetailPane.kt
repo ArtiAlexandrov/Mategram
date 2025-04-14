@@ -1,6 +1,11 @@
 package com.xxcactussell.mategram.ui.chat
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.graphics.BitmapFactory
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import android.view.Window
 import android.view.WindowInsets
@@ -111,9 +116,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.IntOffset
+import androidx.core.content.FileProvider
+import com.xxcactussell.mategram.getMimeType
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
 import org.drinkless.tdlib.TdApi.MessageDocument
 import org.drinkless.tdlib.TdApi.MessageSticker
+import java.io.File
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -123,8 +131,7 @@ fun ChatDetailPane(
     window: Window,
     onBackClick: () -> Unit,
     viewModel: MainViewModel = viewModel(),
-    onShowInfo: () -> Unit,
-    onImageClick: (TdApi.Message) -> Unit
+    onShowInfo: () -> Unit
 ) {
     // Загружаем объект чата асинхронно при изменении chatId.
     var chat: TdApi.Chat? by remember { mutableStateOf(null) }
@@ -149,6 +156,7 @@ fun ChatDetailPane(
     var messageTextToReply by remember { mutableStateOf<String?>(null) }
     var senderNameForReply by remember { mutableStateOf<String?>(null) }
     var selectedMessageId by remember { mutableStateOf<Long?>(null) }
+    val downloadedFiles by viewModel.downloadedFiles.collectAsState()
 
     LaunchedEffect(chat) {
         avatarPath = chat?.let { viewModel.getChatAvatarPath(it) }
@@ -240,10 +248,14 @@ fun ChatDetailPane(
                                     .size(36.dp)
                                     .clip(CircleShape)
                             )
-                        } else {
-                            // Если аватарка еще не загружена, показываем индикатор загрузки.
-                            Box(modifier = Modifier.size(36.dp)) {
-                                CircularProgressIndicator(color = Color.Gray)
+                        }  else {
+                            Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary)) {
+                                Text(
+                                    text = chat?.title?.firstOrNull()?.toString() ?: "Ч",
+                                    modifier = Modifier.align(Alignment.Center),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
                             }
                         }
                         Spacer(modifier = Modifier.size(8.dp))
@@ -347,7 +359,7 @@ fun ChatDetailPane(
         {
             LazyColumn(
                 state = listState,
-                modifier = Modifier,
+                modifier = Modifier.fillMaxSize(),
                 reverseLayout = true
             ) {
                 items(groupedMessages.size) { index ->
@@ -430,6 +442,7 @@ fun ChatDetailPane(
                                             onMediaClick = { message ->
                                                 selectedMessageId = message.id
                                             },
+                                            downloadedFiles = downloadedFiles
                                         )
                                     }
                                     is TdApi.Message -> {
@@ -443,17 +456,27 @@ fun ChatDetailPane(
                                                 )
                                             }
                                             is MessageVideo -> {
-                                                val videoContent = (item.content as MessageVideo).video
+                                                val videoContent = content.video
                                                 val thumbnailFile = (videoContent as Video).thumbnail?.file
                                                 var thumbnailPath by remember { mutableStateOf<String?>(null) }
                                                 val caption = content.caption
 
+
                                                 LaunchedEffect(thumbnailFile) {
-                                                    thumbnailPath =
-                                                        viewModel.getThumbnailVideoFromChat(
-                                                            thumbnailFile
-                                                        )
+                                                    if (thumbnailFile?.local?.isDownloadingCompleted == false) {
+                                                        viewModel.downloadFile(thumbnailFile)
+                                                    } else {
+                                                        thumbnailPath = thumbnailFile?.local?.path
+                                                    }
                                                 }
+
+                                                LaunchedEffect(downloadedFiles.values) {
+                                                    val downloadedFile = downloadedFiles[thumbnailFile?.id]
+                                                    if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                                                        thumbnailPath = downloadedFile.local?.path
+                                                    }
+                                                }
+
 
                                                 Column {
 
@@ -503,13 +526,25 @@ fun ChatDetailPane(
                                                 }
                                             }
                                             is MessagePhoto -> {
-                                                val photoSize = content.photo?.sizes?.find { it.type == "x" }
-                                                var imagePath by remember { mutableStateOf<String?>(null) }
-                                                val caption = content.caption
+                                                val photo = content.photo?.sizes?.lastOrNull()?.photo
+                                                var photoPath by remember { mutableStateOf(photo?.local?.path) }
 
-                                                LaunchedEffect(photoSize) {
-                                                    imagePath = viewModel.getPhotoPreviewFromChat(photoSize)
+                                                LaunchedEffect(photo) {
+                                                    if (photo?.local?.isDownloadingCompleted == false) {
+                                                        viewModel.downloadFile(photo)
+                                                    } else {
+                                                        photoPath = photo?.local?.path
+                                                    }
                                                 }
+
+                                                LaunchedEffect(downloadedFiles.values) {
+                                                    val downloadedFile = downloadedFiles[photo?.id]
+                                                    if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                                                        photoPath = downloadedFile.local?.path
+                                                    }
+                                                }
+
+                                                val caption = content.caption
 
                                                 Column {
                                                     if (caption.text != "" && content.showCaptionAboveMedia) {
@@ -520,7 +555,7 @@ fun ChatDetailPane(
                                                         )
                                                     }
                                                     AsyncImage(
-                                                        model = imagePath,
+                                                        model = photoPath,
                                                         contentDescription = "Фото сообщения",
                                                         contentScale = ContentScale.Crop,
                                                         modifier = Modifier
@@ -546,61 +581,89 @@ fun ChatDetailPane(
                                                         .fillMaxWidth()
                                                         .padding(16.dp)
                                                 ) {
-                                                    val document = (item.content as MessageDocument).document
-                                                    val documentFile = document?.document
-                                                    val documentThumbnail = document?.thumbnail
-                                                    val documentName = document?.fileName.toString()
-
-                                                    var documentThumbnailPath by remember { mutableStateOf<String?>(null) }
-                                                    var uploadedSize by remember { mutableStateOf<String?>("") }
+                                                    val document = content.document.document
+                                                    val downloadedSize = downloadedFiles[document.id]?.local?.downloadedSize ?: 0L
+                                                    val downloadProgress = downloadedSize.toFloat() / document.expectedSize.toFloat()
+                                                    val documentThumbnail = content.document.thumbnail?.file
+                                                    var documentThumbnailPath by remember { mutableStateOf(documentThumbnail?.local?.path) }
+                                                    val documentName = content.document?.fileName.toString()
+                                                    var uploadedSize by remember { mutableStateOf<String?>(formatFileSize(document?.expectedSize?.toInt() ?: 0)) }
                                                     var isDownloading by remember { mutableStateOf(false) }
                                                     var isFileDownloaded by remember { mutableStateOf(false) }
 
-                                                    // Загрузка миниатюры
-                                                    if (documentThumbnail != null) {
-                                                        LaunchedEffect(documentThumbnail) {
-                                                            documentThumbnailPath = viewModel.getDocumentThumbnail(documentThumbnail)
+                                                    LaunchedEffect(documentThumbnail) {
+                                                        if(documentThumbnail?.local?.isDownloadingCompleted == false) {
+                                                            viewModel.addFileToDownloads(documentThumbnail, chatId, messageId)
+                                                        } else {
+                                                            documentThumbnailPath = documentThumbnail?.local?.path
                                                         }
                                                     }
 
-                                                    // Получаем размер файла
-                                                    LaunchedEffect(uploadedSize) {
-                                                        val fileSize =
-                                                            documentFile?.expectedSize?.toInt() ?: 0
-                                                        uploadedSize = formatFileSize(fileSize)
+                                                    LaunchedEffect(document) {
+                                                        if(document.local.isDownloadingCompleted) {
+                                                            isFileDownloaded = true
+                                                        }
+                                                    }
+
+                                                    LaunchedEffect(downloadedFiles.values) {
+                                                        val downloadedFile = downloadedFiles[documentThumbnail?.id]
+                                                        if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                                                            documentThumbnailPath = downloadedFile.local.path
+                                                        }
+                                                    }
+
+
+                                                    LaunchedEffect(downloadedFiles.values) {
+                                                        val downloadedFile = downloadedFiles[document?.id]
+                                                        if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                                                            isFileDownloaded = true
+                                                            isDownloading = false
+                                                        }
                                                     }
 
                                                     val context = LocalContext.current
 
                                                     val onDownloadClick: () -> Unit = {
                                                         scope.launch {
-                                                            isDownloading = true
-                                                            documentFile?.let { file ->
-                                                                val downloadedFilePath =
-                                                                    viewModel.downloadFileToDownloads(
-                                                                        context,
-                                                                        file.id,
-                                                                        documentName
-                                                                    )
-                                                                if (downloadedFilePath != null) {
-                                                                    isFileDownloaded = true
-                                                                    isDownloading = false
-                                                                    Toast.makeText(
-                                                                        context,
-                                                                        "Файл загружен: $downloadedFilePath",
-                                                                        Toast.LENGTH_SHORT
-                                                                    ).show()
+                                                            if (!isFileDownloaded) {
+                                                                isDownloading = true
+                                                                viewModel.addFileToDownloads(document, chatId, messageId)
+                                                            } else {
+                                                                val mimeType = getMimeType(documentName)
+                                                                val filePath = document.local.path
+
+                                                                if (viewModel.isApkFile(filePath)) {
+                                                                    val canInstall = context.packageManager.canRequestPackageInstalls()
+                                                                    if (!canInstall) {
+                                                                        val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                                                                            data = Uri.parse("package:${context.packageName}")
+                                                                        }
+                                                                        context.startActivity(intent) // Открываем настройки для разрешения
+                                                                        return@launch
+                                                                    }
+                                                                    viewModel.installApk(context, filePath)
                                                                 } else {
-                                                                    isDownloading = false
-                                                                    Toast.makeText(
+                                                                    val fileUri = FileProvider.getUriForFile(
                                                                         context,
-                                                                        "Ошибка загрузки файла",
-                                                                        Toast.LENGTH_SHORT
-                                                                    ).show()
+                                                                        "${context.packageName}.provider",
+                                                                        File(filePath)
+                                                                    )
+
+                                                                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                                                                        setDataAndType(fileUri, mimeType)
+                                                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                                    }
+
+                                                                    try {
+                                                                        context.startActivity(intent)
+                                                                    } catch (e: ActivityNotFoundException) {
+                                                                        Toast.makeText(context, "Нет приложения для открытия файла", Toast.LENGTH_SHORT).show()
+                                                                    }
                                                                 }
                                                             }
                                                         }
                                                     }
+
 
                                                     // Отображение в зависимости от состояния файла
                                                     Box(
@@ -614,9 +677,23 @@ fun ChatDetailPane(
                                                         when {
                                                             isDownloading -> {
                                                                 CircularProgressIndicator(
+                                                                    progress = { downloadProgress },
                                                                     modifier = Modifier.size(40.dp),
                                                                     color = MaterialTheme.colorScheme.primary
                                                                 )
+                                                                IconButton (
+                                                                    onClick = {
+                                                                        scope.launch {
+                                                                            viewModel.cancelFileDownload(content.document.document)
+                                                                            isDownloading = false
+                                                                        }
+                                                                    }
+                                                                ) {
+                                                                    Icon(
+                                                                        painterResource(R.drawable.baseline_close_24),
+                                                                        "Отменить"
+                                                                    )
+                                                                }
                                                             }
 
                                                             isFileDownloaded -> {
@@ -660,11 +737,19 @@ fun ChatDetailPane(
                                                             maxLines = 2,
                                                             overflow = TextOverflow.Ellipsis
                                                         )
-                                                        if (uploadedSize != null) {
-                                                            Text(
-                                                                text = uploadedSize!!,
-                                                                style = MaterialTheme.typography.labelMedium
-                                                            )
+                                                        Row {
+                                                            if (isDownloading) {
+                                                                Text(
+                                                                    text = formatFileSize(downloadedSize.toInt() ?: 0) + " / ",
+                                                                    style = MaterialTheme.typography.labelMedium
+                                                                )
+                                                            }
+                                                            if (uploadedSize != null) {
+                                                                Text(
+                                                                    text = uploadedSize!!,
+                                                                    style = MaterialTheme.typography.labelMedium
+                                                                )
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -1073,8 +1158,7 @@ private fun groupMessagesByAlbum(messages: List<TdApi.Message>): List<Any> {
 }
 
 // Создадим класс для хранения альбома
-data class MediaAlbum(val messages: List<TdApi.Message>, val isOutgoing: Boolean, val replyTo: TdApi.MessageReplyTo?, val date: Int, val id: Long) {
-}
+data class MediaAlbum(val messages: List<TdApi.Message>, val isOutgoing: Boolean, val replyTo: TdApi.MessageReplyTo?, val date: Int, val id: Long)
 
 // Создадим Composable для отображения карусели
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1083,7 +1167,8 @@ fun MediaCarousel(
     album: MediaAlbum,
     viewModel: MainViewModel,
     modifier: Modifier = Modifier,
-    onMediaClick: (TdApi.Message) -> Unit
+    onMediaClick: (TdApi.Message) -> Unit,
+    downloadedFiles: MutableMap<Int, TdApi.File?>
 ) {
     val carouselState = rememberCarouselState { album.messages.size }
 
@@ -1104,14 +1189,14 @@ fun MediaCarousel(
                     Box(
                         modifier = Modifier.maskClip(MaterialTheme.shapes.medium)
                     ) {
-                        PhotoContent(message = message, viewModel = viewModel, onMediaClick = onMediaClick)
+                        PhotoContent(message = message, viewModel = viewModel, onMediaClick = onMediaClick, downloadedFiles = downloadedFiles)
                     }
                 }
                 is MessageVideo -> {
                     Box(
                         modifier = Modifier.maskClip(MaterialTheme.shapes.medium)
                     ) {
-                        VideoContent(message = message, viewModel = viewModel, onMediaClick = onMediaClick)
+                        VideoContent(message = message, viewModel = viewModel, onMediaClick = onMediaClick, downloadedFiles = downloadedFiles)
                     }
                 }
             }
@@ -1144,17 +1229,30 @@ fun PhotoContent(
     message: TdApi.Message,
     viewModel: MainViewModel,
     modifier: Modifier = Modifier,
+    downloadedFiles: MutableMap<Int, TdApi. File?>,
     onMediaClick: (TdApi.Message) -> Unit
 ) {
-    val photoSize = (message.content as MessagePhoto).photo?.sizes?.find { it.type == "x" }
-    var imagePath by remember { mutableStateOf<String?>(null) }
+    val photo = (message.content as MessagePhoto).photo.sizes.lastOrNull()?.photo
+    var photoPath by remember { mutableStateOf(photo?.local?.path) }
 
-    LaunchedEffect(photoSize) {
-        imagePath = viewModel.getPhotoPreviewFromChat(photoSize)
+    LaunchedEffect(photo) {
+        if (photo?.local?.isDownloadingCompleted == false) {
+            viewModel.downloadFile(photo)
+        } else {
+            photoPath = photo?.local?.path
+        }
     }
 
+    LaunchedEffect(downloadedFiles.values) {
+        val downloadedFile = downloadedFiles[photo?.id]
+        if (downloadedFile?.local?.isDownloadingCompleted == true) {
+            photoPath = downloadedFile.local?.path
+        }
+    }
+
+
     AsyncImage(
-        model = imagePath,
+        model = photoPath,
         contentDescription = "Фото сообщения",
         contentScale = ContentScale.Crop,
         modifier = Modifier
@@ -1168,14 +1266,26 @@ fun VideoContent(
     message: TdApi.Message,
     viewModel: MainViewModel,
     modifier: Modifier = Modifier,
-    onMediaClick: (TdApi.Message) -> Unit
+    onMediaClick: (TdApi.Message) -> Unit,
+    downloadedFiles: MutableMap<Int, TdApi.File?>
 ) {
     val videoContent = (message.content as MessageVideo).video
     val thumbnailFile = (videoContent as Video).thumbnail?.file
     var thumbnailPath by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(thumbnailFile) {
-        thumbnailPath = viewModel.getThumbnailVideoFromChat(thumbnailFile)
+        if (thumbnailFile?.local?.isDownloadingCompleted == false) {
+            viewModel.downloadFile(thumbnailFile)
+        } else {
+            thumbnailPath = thumbnailFile?.local?.path
+        }
+    }
+
+    LaunchedEffect(downloadedFiles.values) {
+        val downloadedFile = downloadedFiles[thumbnailFile?.id]
+        if (downloadedFile?.local?.isDownloadingCompleted == true) {
+            thumbnailPath = downloadedFile.local?.path
+        }
     }
 
     Box(

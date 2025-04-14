@@ -14,7 +14,7 @@ import kotlin.coroutines.suspendCoroutine
  * Основной класс для взаимодействия с Telegram API через TDLib.
  * Использует **SharedFlow** для обработки событий, что предотвращает потерю данных.
  */
-class TelegramFlow @OptIn(ExperimentalCoroutinesApi::class) constructor(
+class TelegramFlow constructor(
     val resultHandler: ResultHandlerFlow = ResultHandlerSharedFlow()
 ) : Flow<TdApi.Object> by resultHandler, Closeable {
 

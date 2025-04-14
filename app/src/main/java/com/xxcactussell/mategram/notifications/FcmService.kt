@@ -55,20 +55,20 @@ class FcmService : FirebaseMessagingService() {
                     is TdApi.AuthorizationStateWaitTdlibParameters -> {
                         Log.d("FCM", "Initializing TDLib parameters")
                         api.setTdlibParameters(
-                            TelegramCredentials.useTestDc,
+                            TelegramCredentials.USE_TEST_DC,
                             TelegramCredentials.databaseDirectory,
                             TelegramCredentials.filesDirectory,
                             TelegramCredentials.encryptionKey,
-                            TelegramCredentials.useFileDatabase,
-                            TelegramCredentials.useChatInfoDatabase,
-                            TelegramCredentials.useMessageDatabase,
-                            TelegramCredentials.useSecretChats,
-                            TelegramCredentials.apiId,
-                            TelegramCredentials.apiHash,
+                            TelegramCredentials.USE_FILE_DATABASE,
+                            TelegramCredentials.USE_CHAT_INFO_DATABASE,
+                            TelegramCredentials.USE_MESSAGE_DATABASE,
+                            TelegramCredentials.USE_SECRET_CHATS,
+                            TelegramCredentials.API_ID,
+                            TelegramCredentials.API_HASH,
                             TelegramCredentials.systemLanguageCode,
                             TelegramCredentials.deviceModel,
                             TelegramCredentials.systemVersion,
-                            TelegramCredentials.applicationVersion
+                            TelegramCredentials.APPLICATION_VERSION
                         )
                     }
                 }

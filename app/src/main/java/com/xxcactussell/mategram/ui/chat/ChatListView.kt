@@ -66,6 +66,7 @@ import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -84,6 +85,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.MediaItem
 import coil.compose.AsyncImage
 import com.xxcactussell.mategram.MainActivity
 import com.xxcactussell.mategram.MainViewModel
@@ -427,12 +429,7 @@ fun ChatListView(
                             selectedChatForInfoPane = selectedChat
                             showBottomSheet = true
                         },
-                        window = window,
-                        onImageClick = { message ->
-                            scope.launch {
-                                navigator.navigateTo(ListDetailPaneScaffoldRole.Extra, message.id)
-                            }
-                        },
+                        window = window
                     )
                 }
             }
@@ -479,11 +476,24 @@ private fun ChatItem(
         else -> Color.Transparent
     }
     val scope = rememberCoroutineScope()
-    var avatarPath by remember { mutableStateOf<String?>(null) }
 
-    // Следим за изменением фото чата
-    LaunchedEffect(chat.photo) {
-        avatarPath = viewModel.getChatAvatarPath(chat)
+    val photo = chat.photo?.small
+    val downloadedFiles by viewModel.downloadedFiles.collectAsState()
+    var avatarPath by remember { mutableStateOf(downloadedFiles[chat.photo?.small?.id]?.local?.path)}
+
+    LaunchedEffect(photo) {
+        if (photo?.local?.isDownloadingCompleted == false) {
+            viewModel.downloadFile(chat.photo?.small)
+        } else {
+            avatarPath = photo?.local?.path
+        }
+    }
+
+    LaunchedEffect(downloadedFiles.values) {
+        val downloadedFile = downloadedFiles[photo?.id]
+        if (downloadedFile?.local?.isDownloadingCompleted == true) {
+            avatarPath = downloadedFile.local?.path
+        }
     }
 
     Card(
@@ -549,7 +559,7 @@ private fun ChatItem(
                 }
                 Row (verticalAlignment = Alignment.CenterVertically) {
                     var messageContent by remember { mutableStateOf<MessageContent?>(null) }
-                    LaunchedEffect(Unit) {
+                    LaunchedEffect(chat) {
                         messageContent = getMessageContent(chat.id, chat.lastMessage?.id ?: 0L, viewModel)
                     }
                     if (chat.lastMessage?.isOutgoing == true) {
