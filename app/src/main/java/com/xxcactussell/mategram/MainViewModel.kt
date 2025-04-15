@@ -181,14 +181,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Отправка номера телефона
-    fun sendPhone(phone: String) {
-        viewModelScope.launch {
-            println("MainViewModel: отправляем номер телефона: $phone")
-            repository.sendPhone(phone)
-        }
-    }
-
     // Отправка кода подтверждения
     fun sendCode(code: String) {
         viewModelScope.launch {

@@ -2,6 +2,7 @@ package com.xxcactussell.mategram.kotlinx.telegram.core
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.util.Log
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.checkAuthenticationCode
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.checkAuthenticationPassword
@@ -66,12 +67,6 @@ object TelegramRepository : UserKtx, ChatKtx {
 
     }
 
-    fun sendPhone(phone: String) {
-        coroutineScope.launch {
-            println("Отправляем номер телефона: $phone")
-            api.setAuthenticationPhoneNumber(phone, null)
-        }
-    }
 
     fun sendCode(code: String) {
         coroutineScope.launch {
