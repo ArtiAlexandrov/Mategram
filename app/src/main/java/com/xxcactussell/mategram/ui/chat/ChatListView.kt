@@ -1,17 +1,26 @@
 package com.xxcactussell.mategram.ui.chat
 
+import android.os.Handler
+import android.os.Looper
 import android.view.Window
-import androidx.activity.compose.LocalActivity
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideIn
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOut
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -23,6 +32,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -65,10 +75,12 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -76,20 +88,26 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.input.pointer.motionEventSpy
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
 import coil.compose.AsyncImage
-import com.xxcactussell.mategram.MainActivity
 import com.xxcactussell.mategram.MainViewModel
 import com.xxcactussell.mategram.R
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
@@ -105,10 +123,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
-import org.drinkless.tdlib.TdApi.MessagePhoto
-import org.drinkless.tdlib.TdApi.MessageText
-import org.drinkless.tdlib.TdApi.MessageVideo
-import kotlin.coroutines.CoroutineContext
+import org.drinkless.tdlib.TdApi.MessageVoiceNote
 
 @OptIn(
     ExperimentalMaterial3AdaptiveApi::class,
@@ -132,7 +147,17 @@ fun ChatListView(
     var pinnedChats by remember { mutableStateOf(emptyList<Long>()) }
     var includedChats by remember { mutableStateOf(emptyList<Long>()) }
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    var chatPaneWidth by remember { mutableStateOf(0.dp) }
     var isRefreshing by remember { mutableStateOf(false) }
+    var paddingValuesOpened by remember { mutableStateOf(PaddingValues(0.dp, 108.dp, 0.dp, 0.dp)) }
+    val paddingValues by remember { mutableStateOf(PaddingValues(0.dp, 92.dp, 0.dp, 0.dp)) }
+    var isChatOpened by remember { mutableStateOf(true) }
+    var voiceNoteChatId by remember { mutableStateOf<Long?>(null) }
+    var voiceNotePlaying by remember { mutableStateOf<MessageVoiceNote?>(null) }
+    var idMessageOfVoiceNote by remember { mutableStateOf<Long?>(null) }
+    var isVoicePlaying by remember { mutableStateOf(false) }
+    var isVoicePanelOpened by remember { mutableStateOf(false) }
 
     LaunchedEffect(me) {
         if (me!=null) {
@@ -181,7 +206,6 @@ fun ChatListView(
         selectedChat = chats.find { it.id == selectedChatId }
         selectedChatForInfoPane = chats.find { it.id == selectedChatId }
     }
-    val activity = (LocalActivity.current as? MainActivity)?.intent
 
     if (showBottomSheet && selectedChatForInfoPane != null) {
         ModalBottomSheet(
@@ -199,8 +223,9 @@ fun ChatListView(
     }
 
     NavigableListDetailPaneScaffold(
-        modifier = Modifier.background(MaterialTheme.colorScheme.background)
-                .windowInsetsPadding(WindowInsets.ime),
+        modifier = Modifier
+            .background(MaterialTheme.colorScheme.background)
+            .windowInsetsPadding(WindowInsets.ime),
         listPane = {
             AnimatedPane (
                 modifier = Modifier.fillMaxSize()
@@ -274,6 +299,7 @@ fun ChatListView(
                     },
                     modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection) // Связываем прокрутку LazyColumn с TopAppBar
                 ) { padding ->
+                    paddingValuesOpened = padding
                     Column(modifier = Modifier.padding(padding)) {
                         PullToRefreshBox(
                             isRefreshing = isRefreshing,
@@ -388,8 +414,9 @@ fun ChatListView(
                                                     ListDetailPaneScaffoldRole.Detail,
                                                     chat.id
                                                 )
+                                                isChatOpened = true
                                             }
-                                        },
+                                        }
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                 }
@@ -409,6 +436,7 @@ fun ChatListView(
                                                     ListDetailPaneScaffoldRole.Detail,
                                                     chat.id
                                                 )
+                                                isChatOpened = true
                                             }
                                         }
                                     )
@@ -423,6 +451,9 @@ fun ChatListView(
         detailPane = {
             selectedChat?.let { chat ->
                 AnimatedPane (
+                    modifier = Modifier.onGloballyPositioned { coordinates ->
+                        chatPaneWidth = with(density) { coordinates.size.width.toDp() }
+                    },
                     enterTransition = slideInHorizontally(
                         animationSpec = tween(
                             durationMillis = 600,
@@ -445,12 +476,30 @@ fun ChatListView(
                                 navigator.navigateBack()
                                 api.closeChat(chat.id)
                             }
+                            isChatOpened = false
                         },
                         onShowInfo = {
                             selectedChatForInfoPane = selectedChat
                             showBottomSheet = true
                         },
-                        window = window
+                        window = window,
+                        isVoicePlaying = isVoicePlaying,
+                        idMessageOfVoiceNote = idMessageOfVoiceNote,
+                        onTogglePlay = { messageId, content, chatId ->
+                            if (idMessageOfVoiceNote != messageId) {
+                                isVoicePlaying = false
+                                isVoicePanelOpened = false
+                                Handler(Looper.getMainLooper()).post {
+                                    voiceNoteChatId = chatId
+                                    idMessageOfVoiceNote = messageId
+                                    voiceNotePlaying = content
+                                    isVoicePanelOpened = true
+                                    isVoicePlaying = true
+                                }
+                            } else {
+                                isVoicePlaying = !isVoicePlaying
+                            }
+                        }
                     )
                 }
             }
@@ -474,6 +523,50 @@ fun ChatListView(
             )
         }
     )
+    Box(Modifier.fillMaxWidth()) {
+        AnimatedVisibility(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(if (isChatOpened) paddingValues else paddingValuesOpened)
+                .widthIn(max = chatPaneWidth),
+            visible = isVoicePanelOpened,
+            enter = slideIn { IntOffset(0, it.height * -2) } + fadeIn(),
+            exit = slideOut { IntOffset(0, it.height * -2) } + fadeOut()
+        ) {
+            ElevatedCard(
+                modifier = Modifier.padding(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.inversePrimary
+                ),
+                shape = RoundedCornerShape(40.dp)
+            ) {
+                idMessageOfVoiceNote?.let {
+                    VoiceNotePlayer(
+                        content = voiceNotePlaying,
+                        viewModel = viewModel,
+                        chatId = voiceNoteChatId,
+                        messageId = it,
+                        isPlaying = isVoicePlaying,
+                        onCloseClicked = {
+                            isVoicePanelOpened = false
+                            isVoicePlaying = false
+                            idMessageOfVoiceNote = null
+                            voiceNotePlaying = null
+                        },
+                        onStopedPlay = {
+                            scope.launch {
+                                viewModel.markVoiceNoteAsListened(voiceNoteChatId, idMessageOfVoiceNote)
+                            }
+                            isVoicePanelOpened = false
+                            isVoicePlaying = false
+                            voiceNotePlaying = null
+                        },
+                        onPlayClicked = { isVoicePlaying = !isVoicePlaying },
+                    )
+                }
+            }
+        }
+    }
     LaunchedEffect(Unit) {
         viewModel.navigationEvent.collect { chatId ->
             navigator.navigateTo(ThreePaneScaffoldRole.Primary, chatId)
@@ -522,7 +615,7 @@ private fun ChatItem(
             .padding(horizontal = 16.dp)
             .clip(RoundedCornerShape(24.dp))
             .clickable {
-                scope.launch{
+                scope.launch {
                     onChatClick(chat.id)
                 }
             },
@@ -542,7 +635,10 @@ private fun ChatItem(
                 )
             } else {
                 // Показываем placeholder или индикатор загрузки
-                Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary)) {
+                Box(modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary)) {
                     Text(
                         text = chat.title?.firstOrNull()?.toString() ?: "Ч",
                         modifier = Modifier.align(Alignment.Center),
@@ -596,7 +692,9 @@ private fun ChatItem(
                         ByteArrayImage(
                             imageData = it,
                             contentDescription = "Медиа в ответе",
-                            modifier = Modifier.size(16.dp).clip(RoundedCornerShape(4.dp)),
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clip(RoundedCornerShape(4.dp)),
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                     }
@@ -627,6 +725,191 @@ private fun ChatItem(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun VoiceNotePlayer(
+    content: MessageVoiceNote?,
+    viewModel: MainViewModel,
+    chatId: Long?,
+    messageId: Long?,
+    isPlaying: Boolean,
+    onCloseClicked: () -> Unit,
+    onPlayClicked: () -> Unit,
+    onStopedPlay: () -> Unit
+) {
+    val voiceNote = content?.voiceNote
+    val voiceFile = voiceNote?.voice
+    val downloadedFiles by viewModel.downloadedFiles.collectAsState()
+    val context = LocalContext.current
+    val isDownloaded = voiceFile?.local?.isDownloadingCompleted == true || downloadedFiles[voiceFile?.id]?.local?.isDownloadingCompleted == true
+
+    val exoPlayer = remember(messageId) {
+        ExoPlayer.Builder(context).build().apply {
+            playWhenReady = false
+            repeatMode = Player.REPEAT_MODE_OFF
+
+            // Добавляем слушатель для отслеживания состояния плеера
+            addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_ENDED) {
+                        // Когда воспроизведение завершено, вызываем onCloseClicked
+                        onStopedPlay()
+                    }
+                }
+            })
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            exoPlayer.release()
+        }
+    }
+    val progress = remember(messageId) { mutableFloatStateOf(0f) }
+    var currentPosition by remember(messageId) { mutableLongStateOf(0L) }
+    var totalDuration by remember(messageId) { mutableLongStateOf(0L) }
+
+    LaunchedEffect(messageId) {
+        while (true) {
+            delay(100)
+            if (exoPlayer.duration > 0) {
+                progress.floatValue = exoPlayer.currentPosition.toFloat() / exoPlayer.duration.toFloat()
+                currentPosition = exoPlayer.currentPosition
+                totalDuration = exoPlayer.duration
+            }
+        }
+    }
+
+
+    LaunchedEffect(voiceFile) {
+        when {
+            voiceFile == null -> return@LaunchedEffect
+            !voiceFile.local.isDownloadingCompleted && chatId != null && messageId != null -> {
+                viewModel.addFileToDownloads(voiceFile, chatId, messageId)
+            }
+            voiceFile.local.isDownloadingCompleted -> {
+                voiceFile.local.path?.let { path ->
+                    exoPlayer.setMediaItem(MediaItem.fromUri(path))
+                    exoPlayer.prepare()
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(downloadedFiles.values) {
+        val downloadedFile = downloadedFiles[voiceFile?.id]
+        if (downloadedFile?.local?.isDownloadingCompleted == true) {
+            downloadedFile.local.path?.let { path ->
+                exoPlayer.setMediaItem(MediaItem.fromUri(path))
+                exoPlayer.prepare()
+            }
+        }
+    }
+    LaunchedEffect(isPlaying) {
+        if (isPlaying) exoPlayer.play() else exoPlayer.pause()
+    }
+
+    val waveform = voiceNote?.waveform
+
+    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.Center) {
+        Row {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.primary)
+                    .clickable {
+                        if (isDownloaded) {
+                            onPlayClicked()
+                        }
+                    }
+            ) {
+                if (!isDownloaded) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .align(Alignment.Center),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        modifier = Modifier.align(Alignment.Center),
+                        painter = painterResource(
+                            if (isPlaying) R.drawable.baseline_pause_24
+                            else R.drawable.baseline_play_arrow_24
+                        ),
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        contentDescription = "Управление воспроизведением"
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+
+            val primaryColor = MaterialTheme.colorScheme.primaryContainer
+            val progressColor = MaterialTheme.colorScheme.primary
+
+            Canvas(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(32.dp)
+            ) {
+                val step = size.width / (waveform?.size ?: 1)
+                val progressIndex = ((waveform?.size ?: 1) * progress.floatValue).toInt()
+
+                waveform?.forEachIndexed { index, amplitude ->
+                    val height = (amplitude / 255f) * size.height
+                    val color = if (index <= progressIndex) progressColor else primaryColor
+
+                    drawLine(
+                        color = color,
+                        start = Offset(index * step, size.height / 2 - height / 2),
+                        end = Offset(index * step, size.height / 2 + height / 2),
+                        strokeWidth = 4f,
+                        cap = StrokeCap.Round
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Text(
+                modifier = Modifier.align(Alignment.CenterVertically),
+                text = buildString {
+                    val currentSeconds = (currentPosition / 1000).toInt()
+                    val totalSeconds = (totalDuration / 1000).toInt()
+                    append(formatDuration(currentSeconds))
+                    append(" / ")
+                    append(formatDuration(totalSeconds))
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.primary)
+                    .clickable {
+                        exoPlayer.release()
+                        onCloseClicked()
+                    }
+            ) {
+                Icon(
+                    modifier = Modifier.align(Alignment.Center),
+                    painter = painterResource(
+                        R.drawable.baseline_close_24
+                    ),
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    contentDescription = "Управление воспроизведением"
+                )
+            }
+
         }
     }
 }

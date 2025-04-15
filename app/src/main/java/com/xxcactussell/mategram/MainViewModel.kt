@@ -7,6 +7,10 @@ import android.app.PendingIntent
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
@@ -18,6 +22,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.xxcactussell.mategram.domain.entity.AuthState
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramCredentials
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramException
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.loadChatDetails
@@ -415,6 +420,149 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun sendVoiceNote(chatId: Long, filePath: String, replyToMessageId: TdApi.InputMessageReplyTo?) {
+        viewModelScope.launch {
+            try {
+                val inputFile = TdApi.InputFileLocal(filePath)
+
+                val duration = getAudioDuration(filePath)
+
+                val waveform = generateWaveform(filePath)
+
+                val caption = TdApi.FormattedText("", emptyArray<TdApi.TextEntity>())
+
+                // Create the voice note message with null self-destruct type
+                val voiceNote = TdApi.InputMessageVoiceNote().apply {
+                    this.voiceNote = inputFile
+                    this.duration = duration
+                    this.waveform = waveform
+                    this.caption = caption
+                    this.selfDestructType = null
+                }
+
+                // Send the message
+                api.sendMessage(
+                    chatId = chatId,
+                    messageThreadId = 0,
+                    replyTo = replyToMessageId,
+                    options = TdApi.MessageSendOptions(),
+                    replyMarkup = null,
+                    inputMessageContent = voiceNote
+                )
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Error sending voice note: ${e.message}")
+            }
+        }
+    }
+    private fun getAudioDuration(filePath: String): Int {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(filePath)
+            val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            (durationStr?.toLong() ?: 0L).toInt() / 1000 // Convert milliseconds to seconds
+        } catch (e: Exception) {
+            Log.e("MainViewModel", "Error getting audio duration: ${e.message}")
+            0
+        } finally {
+            retriever.release()
+        }
+    }
+
+    private fun generateWaveform(filePath: String): ByteArray {
+        val retriever = MediaMetadataRetriever()
+        val audioFile = java.io.File(filePath)
+        val waveform = ByteArray(100) // TDLib expects 100 samples for voice notes
+
+        try {
+            retriever.setDataSource(filePath)
+            val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 0
+
+            val mediaExtractor = MediaExtractor()
+            mediaExtractor.setDataSource(filePath)
+
+            // Find the audio track
+            val audioTrackIndex = (0 until mediaExtractor.trackCount)
+                .find { mediaExtractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+                ?: return ByteArray(100) { 50.toByte() } // Default waveform if no audio track found
+
+            mediaExtractor.selectTrack(audioTrackIndex)
+            val format = mediaExtractor.getTrackFormat(audioTrackIndex)
+
+            // Get audio properties
+            val sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            val samples = (durationMs * sampleRate / 1000).toInt()
+
+            // Calculate samples per waveform point
+            val samplesPerPoint = samples / waveform.size
+
+            // Read audio data
+            val decoder = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME) ?: "audio/mp4a-latm")
+            decoder.configure(format, null, null, 0)
+            decoder.start()
+
+            var currentWaveformIndex = 0
+            var maxAmplitude = 0.0f
+            var samplesRead = 0
+
+            val info = MediaCodec.BufferInfo()
+
+            while (currentWaveformIndex < waveform.size) {
+                val inputBufferId = decoder.dequeueInputBuffer(10000)
+                if (inputBufferId >= 0) {
+                    val buffer = decoder.getInputBuffer(inputBufferId)
+                    val sampleSize = mediaExtractor.readSampleData(buffer!!, 0)
+
+                    if (sampleSize < 0) {
+                        decoder.queueInputBuffer(inputBufferId, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    } else {
+                        decoder.queueInputBuffer(inputBufferId, 0, sampleSize, mediaExtractor.sampleTime, 0)
+                        mediaExtractor.advance()
+                    }
+                }
+
+                val outputBufferId = decoder.dequeueOutputBuffer(info, 10000)
+                if (outputBufferId >= 0) {
+                    val buffer = decoder.getOutputBuffer(outputBufferId)
+                    val shortBuffer = buffer?.asShortBuffer()
+
+                    if (shortBuffer != null) {
+                        while (shortBuffer.hasRemaining() && currentWaveformIndex < waveform.size) {
+                            val amplitude = Math.abs(shortBuffer.get() / 32768.0f)
+                            maxAmplitude = maxOf(maxAmplitude, amplitude)
+                            samplesRead++
+
+                            if (samplesRead >= samplesPerPoint) {
+                                // Convert to 5-bit format (0-31 range) as required by TDLib
+                                waveform[currentWaveformIndex] = (maxAmplitude * 31).toInt().toByte()
+                                currentWaveformIndex++
+                                maxAmplitude = 0.0f
+                                samplesRead = 0
+                            }
+                        }
+                    }
+
+                    decoder.releaseOutputBuffer(outputBufferId, false)
+
+                    if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                        break
+                    }
+                }
+            }
+
+            decoder.stop()
+            decoder.release()
+            mediaExtractor.release()
+
+        } catch (e: Exception) {
+            Log.e("MainViewModel", "Error generating waveform: ${e.message}")
+            return ByteArray(100) { 50.toByte() } // Return default waveform on error
+        } finally {
+            retriever.release()
+        }
+
+        return waveform
+    }
 
     fun sendMessage(chatId: Long, text: String, replyToMessageId: TdApi.InputMessageReplyTo? = null) {
         viewModelScope.launch {
@@ -495,8 +643,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         api.viewMessages(message.chatId, longArrayOf(message.id), null, true)
     }
 
-    suspend fun getMessageById(replyMessage: TdApi.MessageReplyToMessage): TdApi.Message {
-        return api.getMessage(replyMessage.chatId, replyMessage.messageId)
+    fun markVoiceNoteAsListened(chatId: Long?, messageId: Long?) {
+        viewModelScope.launch {
+            try {
+                if (chatId != null && messageId != null) {
+                    api.client?.send(
+                        TdApi.OpenMessageContent(
+                            chatId,
+                            messageId
+                        )
+                    ) { result ->
+                        Log.d("LOG", "$result")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Error marking voice note as listened", e)
+            }
+        }
+    }
+
+    fun getMessageById(replyMessage: TdApi.MessageReplyToMessage): TdApi.Message? {
+        var message: TdApi.Message? = null
+        try {
+            api.client?.send(TdApi.GetMessage(replyMessage.chatId, replyMessage.messageId)) { response ->
+                message = (response as TdApi.Message)
+            }
+        } catch (e: TelegramException) {
+            message = null
+        }
+        return message
     }
 
     fun handleNotificationOpen(chatId: Long) {

@@ -1,8 +1,13 @@
 package com.xxcactussell.mategram.ui.chat
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -12,23 +17,45 @@ import android.util.Log
 import android.view.Window
 import android.view.WindowInsets
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideIn
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOut
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitDragOrCancellation
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -48,12 +75,14 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -71,6 +100,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -86,7 +116,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -127,6 +159,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.IntOffset
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
@@ -134,10 +167,16 @@ import com.airbnb.lottie.compose.animateLottieCompositionAsState
 import com.airbnb.lottie.compose.rememberLottieComposition
 import com.xxcactussell.mategram.getMimeType
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import org.drinkless.tdlib.TdApi.EndGroupCallRecording
 import org.drinkless.tdlib.TdApi.MessageDocument
 import org.drinkless.tdlib.TdApi.MessageSticker
 import org.drinkless.tdlib.TdApi.MessageVoiceNote
+import org.drinkless.tdlib.TdApi.VoiceNote
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -148,8 +187,16 @@ fun ChatDetailPane(
     window: Window,
     onBackClick: () -> Unit,
     viewModel: MainViewModel = viewModel(),
-    onShowInfo: () -> Unit
+    onShowInfo: () -> Unit,
+    isVoicePlaying: Boolean,
+    idMessageOfVoiceNote: Long?,
+    onTogglePlay: (Long, MessageVoiceNote, Long) -> Unit
 ) {
+
+    BackHandler(enabled = true) {
+        onBackClick()
+    }
+
     // Загружаем объект чата асинхронно при изменении chatId.
     var chat: TdApi.Chat? by remember { mutableStateOf(null) }
     LaunchedEffect(chatId) {
@@ -175,12 +222,9 @@ fun ChatDetailPane(
     var messageTextToReply by remember { mutableStateOf<String?>(null) }
     var senderNameForReply by remember { mutableStateOf<String?>(null) }
     var selectedMessageId by remember { mutableStateOf<Long?>(null) }
-
-    var voiceNotePlaying by remember { mutableStateOf<MessageVoiceNote?>(null) }
-    var idMessageOfVoiceNote by remember { mutableStateOf<Long?>(null) }
-    var isVoicePlaying by remember { mutableStateOf(false) }
-    var isVoicePanelOpened by remember { mutableStateOf(false) }
-
+    var currentMessageMode by remember { mutableStateOf("voice") }
+    var lastMessageMode by remember { mutableStateOf("voice") }
+    var isRecording by remember { mutableStateOf(false) }
 
     LaunchedEffect(photo) {
         if (photo?.local?.isDownloadingCompleted == false) {
@@ -229,6 +273,60 @@ fun ChatDetailPane(
             }
         }
     }
+
+    LaunchedEffect(idMessageOfVoiceNote, isVoicePlaying) {
+        Log.d("VoiceNote", "LaunchedEffect triggered: messageId=$idMessageOfVoiceNote, isPlaying=$isVoicePlaying")
+
+        if (idMessageOfVoiceNote != null && !isVoicePlaying) {
+            delay(100)
+
+            // Ищем текущее сообщение
+            val currentIndex = groupedMessages.indexOfFirst { message ->
+                when (message) {
+                    is TdApi.Message -> {
+                        val found = message.id == idMessageOfVoiceNote
+                        if (found) Log.d("VoiceNote", "Found current message at index")
+                        found
+                    }
+                    else -> false
+                }
+            }
+
+            if (currentIndex != -1) {
+                // Ищем следующее голосовое сообщение в обратном направлении
+                val nextVoiceNote = groupedMessages.take(currentIndex).reversed().firstOrNull { message ->
+                    when (message) {
+                        is TdApi.Message -> {
+                            val isVoiceNote = message.content is MessageVoiceNote &&
+                                    !(message.content as MessageVoiceNote).isListened
+                            if (isVoiceNote) Log.d("VoiceNote", "Found next unlistened voice note: ${message.id}")
+                            isVoiceNote
+                        }
+                        is MediaAlbum -> false
+                        else -> false
+                    }
+                }
+
+                if (nextVoiceNote is TdApi.Message && nextVoiceNote.content is MessageVoiceNote) {
+                    Log.d("VoiceNote", "Playing next voice note: ${nextVoiceNote.id}")
+                    viewModel.markVoiceNoteAsListened(chatId, idMessageOfVoiceNote) // Отмечаем текущее как прослушанное
+                    delay(100) // Даем время на обновление состояния
+                    onTogglePlay(
+                        nextVoiceNote.id,
+                        nextVoiceNote.content as MessageVoiceNote,
+                        chatId
+                    )
+                } else {
+                    Log.d("VoiceNote", "No more unlistened voice notes found")
+                    viewModel.markVoiceNoteAsListened(chatId, idMessageOfVoiceNote) // Отмечаем последнее как прослушанное
+                }
+            } else {
+                Log.d("VoiceNote", "Current message not found in the list")
+            }
+        }
+    }
+
+
 
 // Прокрутка к первому непрочитанному сообщению при первой загрузке чата
     LaunchedEffect(chat?.unreadCount) {
@@ -312,68 +410,21 @@ fun ChatDetailPane(
             )
         },
         bottomBar = {
-            Row(modifier = Modifier
-                .padding(8.dp)
-                .navigationBarsPadding()
-                .background(Color.Transparent),
-                verticalAlignment = Alignment.Bottom) {
-                Card(modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .wrapContentSize(),
-                    shape = RoundedCornerShape(28.dp)
-                ) {
-                    Row (modifier = Modifier
-                        .fillMaxWidth(),
-                        verticalAlignment = Alignment.Bottom) {
-                        IconButton(
-                            modifier = Modifier.size(56.dp),
-                            onClick = { }
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.baseline_add_circle_outline_24),
-                                contentDescription = "Назад"
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                        ) {
-                            TextField(
-                                value = textNewMessage,
-                                onValueChange = { textNewMessage = it },
-                                placeholder = { Text("Cообщение") },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .align(Alignment.BottomStart),
-                                colors = TextFieldDefaults.colors(
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent,
-                                    disabledIndicatorColor = Color.Transparent
-                                ),
-                                maxLines = 5,
-                                keyboardOptions = KeyboardOptions(
-                                    capitalization = KeyboardCapitalization.Sentences
-                                )
-                            )
-                        }
-                        IconButton(
-                            modifier = Modifier.size(56.dp),
-                            onClick = { }
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.baseline_insert_emoticon_24),
-                                contentDescription = "Назад"
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.size(8.dp))
-                FilledIconButton(
-                    modifier = Modifier.size(56.dp),
-                    onClick = {
-                        if (textNewMessage != "") {
+            ChatBottomBar(
+                chatId = chatId,
+                textNewMessage = textNewMessage,
+                onTextChange = { textNewMessage = it },
+                currentMessageMode = currentMessageMode,
+                lastMessageMode = lastMessageMode,
+                onCurrentModeChange = { currentMessageMode = it },
+                isRecording = isRecording,
+                onRecordingChange = { isRecording = it },
+                inputMessageToReply = inputMessageToReply,
+                onReplyChange = { inputMessageToReply = it },
+                viewModel = viewModel,
+                onModeChange = {
+                    if (currentMessageMode == "text") {
+                        if (textNewMessage.isNotEmpty()) {
                             viewModel.sendMessage(
                                 chatId = chatId,
                                 text = textNewMessage,
@@ -381,12 +432,15 @@ fun ChatDetailPane(
                             )
                             textNewMessage = ""
                             inputMessageToReply = null
+                            currentMessageMode = lastMessageMode
                         }
-                    },
-                ) {
-                    Icon(painterResource(R.drawable.baseline_send_24), contentDescription = "Extended floating action button.")
+                    } else if (currentMessageMode == "voice") {
+                        currentMessageMode = "video"
+                    } else if (currentMessageMode == "video") {
+                        currentMessageMode = "voice"
+                    }
                 }
-            }
+            )
         }
     ) { innerPadding ->
         // Основной контент экрана чата.
@@ -877,21 +931,63 @@ fun ChatDetailPane(
                                                 }
                                             }
                                             is MessageVoiceNote -> {
-                                                VoiceNoteMessage(
-                                                    isPlaying = idMessageOfVoiceNote,
-                                                    onTogglePlay = {
-                                                        if (idMessageOfVoiceNote != messageId) {
-                                                            idMessageOfVoiceNote = messageId
-                                                            isVoicePanelOpened = true
-                                                            voiceNotePlaying = content
-                                                            isVoicePlaying = true
-                                                        } else {
-                                                            isVoicePlaying = !isVoicePlaying
-                                                        }
-                                                    },
-                                                    messageId = messageId,
-                                                    isVoiceNotePlaing = isVoicePlaying
-                                                )
+                                                var isListened by remember { mutableStateOf(false) }
+
+                                                LaunchedEffect(isVoicePlaying) {
+                                                    isListened = content.isListened
+                                                }
+                                                Row(
+                                                    modifier = Modifier.padding(16.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(36.dp)
+                                                            .clip(CircleShape)
+                                                            .background(MaterialTheme.colorScheme.primary)
+                                                            .clickable { onTogglePlay(messageId, content, chatId) },
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(
+                                                            painter = painterResource(
+                                                                id = if (idMessageOfVoiceNote == messageId && isVoicePlaying)
+                                                                    R.drawable.baseline_pause_24
+                                                                else
+                                                                    R.drawable.baseline_play_arrow_24
+                                                            ),
+                                                            contentDescription = "Play/Pause",
+                                                            tint = MaterialTheme.colorScheme.onPrimary
+                                                        )
+                                                    }
+
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(36.dp)
+                                                            .clip(CircleShape)
+                                                            .background(MaterialTheme.colorScheme.surface),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        AnimatedVoiceIndicator(isPlaying = idMessageOfVoiceNote == messageId && isVoicePlaying)
+                                                    }
+
+                                                    val seconds = content.voiceNote.duration
+                                                    Text(
+                                                        text = formatDuration(seconds),
+                                                        style = MaterialTheme.typography.bodyMedium
+                                                    )
+
+                                                    // Используем состояние из актуального сообщения
+                                                    if (!isListened) {
+                                                        Box(
+                                                            Modifier
+                                                                .size(8.dp)
+                                                                .clip(CircleShape)
+                                                                .background(MaterialTheme.colorScheme.primary)
+                                                        )
+                                                    }
+                                                }
+
                                             }
                                             else -> {
                                                 Text(
@@ -1012,41 +1108,6 @@ fun ChatDetailPane(
             }
             AnimatedVisibility(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                visible = isVoicePanelOpened,
-                enter = slideIn { IntOffset(0, it.height * -2) } + fadeIn(),
-                exit = slideOut { IntOffset(0, it.height * -2) } + fadeOut()
-            ) {
-                ElevatedCard(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.inversePrimary
-                    ),
-                    shape = RoundedCornerShape(40.dp)
-                    ) {
-                    idMessageOfVoiceNote?.let {
-                        VoiceNotePlayer(
-                            content = voiceNotePlaying,
-                            viewModel = viewModel,
-                            downloadedFiles = downloadedFiles,
-                            chatId = chatId,
-                            messageId = it,
-                            isPlaying = isVoicePlaying,
-                            onCloseClicked = {
-                                isVoicePanelOpened = false
-                                isVoicePlaying = false
-                                idMessageOfVoiceNote = null
-                                voiceNotePlaying = null
-                            },
-                            onPlayClicked = { isVoicePlaying = !isVoicePlaying },
-                        )
-                    }
-                }
-            }
-
-            AnimatedVisibility(
-                modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .padding(16.dp),
@@ -1133,10 +1194,8 @@ fun RepliedMessage(replyTo: TdApi.MessageReplyTo?, viewModel: MainViewModel, onC
             if (replyTo is MessageReplyToMessage) {
                 messageToReply = viewModel.getMessageById(replyTo)
             }
-            messageContent = messageToReply?.let { getMessageContent(it.chatId, it.id, viewModel) }!!
-            messageTextToReply = messageContent?.textForReply
-            Log.d("MESSAGE TH", "Message thumbnail: ${messageContent!!.thumbnail}")
-            Log.d("MESSAGE TH", "Message to reply: $messageToReply")
+            messageContent = messageToReply?.let { getMessageContent(it.chatId, it.id, viewModel) }
+            messageTextToReply = messageContent?.textForReply ?: "Контент недоступен"
         }
 
         var replyTitle by remember { mutableStateOf("") }
@@ -1155,6 +1214,8 @@ fun RepliedMessage(replyTo: TdApi.MessageReplyTo?, viewModel: MainViewModel, onC
                         user.firstName + " " + user.lastName
                     // Извлекаем имя и фамилию пользователя
                 }
+            } else {
+                replyTitle = "Удаленное сообщение"
             }
         }
         Row(
@@ -1623,41 +1684,11 @@ private fun getAnnotatedString(formattedText: TdApi.FormattedText): AnnotatedStr
     }
 }
 
-
-@Composable
-fun VoiceNoteMessage(isPlaying: Long?, onTogglePlay: () -> Unit, messageId: Long, isVoiceNotePlaing: Boolean) {
-    Row(
-        modifier = Modifier.padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        // Кнопка play/pause – круг 36.dp
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary)
-                .clickable { onTogglePlay() },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                painter = painterResource(
-                    id = if (isPlaying == messageId && isVoiceNotePlaing) R.drawable.baseline_pause_24 else R.drawable.baseline_play_arrow_24
-                ),
-                contentDescription = "Play/Pause",
-                tint = MaterialTheme.colorScheme.onPrimary
-            )
-        }
-        // Круг 36.dp с анимацией голосового индикатора
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surface),
-            contentAlignment = Alignment.Center
-        ) {
-            AnimatedVoiceIndicator(isPlaying = isPlaying == messageId && isVoiceNotePlaing)
-        }
+@SuppressLint("DefaultLocale")
+fun formatDuration(seconds: Int): String {
+    return when {
+        seconds < 3600 -> String.format("%02d:%02d", seconds / 60, seconds % 60)
+        else -> String.format("%02d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
     }
 }
 
@@ -1740,149 +1771,525 @@ fun AnimatedVoiceIndicator(isPlaying: Boolean) {
 }
 
 @Composable
-fun VoiceNotePlayer(content: MessageVoiceNote?,
-                    viewModel: MainViewModel,
-                    downloadedFiles:
-                    MutableMap<Int, TdApi.File?>,
-                    chatId: Long,
-                    messageId: Long,
-                    isPlaying: Boolean,
-                    onCloseClicked: () -> Unit,
-                    onPlayClicked: () -> Unit
+fun ChatBottomBar(
+    modifier: Modifier = Modifier,
+    chatId: Long,
+    textNewMessage: String,
+    onTextChange: (String) -> Unit,
+    currentMessageMode: String,
+    lastMessageMode: String,
+    onCurrentModeChange: (String) -> Unit,
+    isRecording: Boolean,
+    onRecordingChange: (Boolean) -> Unit,
+    inputMessageToReply: TdApi.InputMessageReplyTo?,
+    onReplyChange: (TdApi.InputMessageReplyTo?) -> Unit,
+    viewModel: MainViewModel,
+    onModeChange: () -> Unit
 ) {
-    val voiceNote = content?.voiceNote
-    val voiceFile = voiceNote?.voice
-    val context = LocalContext.current
-    val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
-            playWhenReady = false
-            repeatMode = Player.REPEAT_MODE_OFF
-        }
-    }
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+    ) {
+        Card(
+            modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(8.dp, 8.dp, 72.dp, 8.dp),
+            shape = RoundedCornerShape(28.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                IconButton(
+                    modifier = Modifier.size(56.dp),
+                    onClick = { }
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.baseline_add_circle_outline_24),
+                        contentDescription = "Добавить"
+                    )
+                }
 
-    val progress = remember { mutableFloatStateOf(0f) }
-    val handler = remember { Handler(Looper.getMainLooper()) }
-    val updateProgress = remember {
-        object : Runnable {
-            override fun run() {
-                if (exoPlayer.isPlaying) {
-                    progress.floatValue = exoPlayer.currentPosition.toFloat() / exoPlayer.duration.toFloat()
-                    handler.postDelayed(this, 100L) // Обновляем каждые 100 мс
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    TextField(
+                        value = textNewMessage,
+                        onValueChange = { text ->
+                            onTextChange(text)
+                            if (currentMessageMode == "voice" || currentMessageMode == "video") {
+                                onCurrentModeChange("text")
+                            }
+                            if (text.isEmpty()) {
+                                onCurrentModeChange(lastMessageMode)
+                            }
+                        },
+                        placeholder = { Text("Сообщение") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.BottomStart),
+                        colors = TextFieldDefaults.colors(
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent
+                        ),
+                        maxLines = 5,
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Sentences
+                        )
+                    )
+                }
+
+                IconButton(
+                    modifier = Modifier.size(56.dp),
+                    onClick = { }
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.baseline_insert_emoticon_24),
+                        contentDescription = "Эмодзи"
+                    )
                 }
             }
         }
-    }
 
-// Запускаем обновление при воспроизведении
-    DisposableEffect(isPlaying) {
-        if (isPlaying) {
-            handler.post(updateProgress)
-        } else {
-            handler.removeCallbacks(updateProgress)
+        Box(
+            modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
+        ) {
+            VoiceRecordButton(
+                modifier = Modifier.wrapContentSize().align(Alignment.CenterEnd),
+                currentMessageMode = currentMessageMode,
+                onModeChange = {
+                    onModeChange()
+                },
+                onSendVoiceNote = { filePath ->
+                    viewModel.sendVoiceNote(
+                        chatId = chatId,
+                        filePath = filePath,
+                        replyToMessageId = inputMessageToReply
+                    )
+                    onReplyChange(null)
+                },
+                isRecording = isRecording,
+                onRecordingChange = onRecordingChange
+            )
         }
 
-        onDispose {
-            handler.removeCallbacks(updateProgress)
+    }
+}
+
+@SuppressLint("DefaultLocale")
+@Composable
+fun VoiceRecordButton(
+    modifier: Modifier = Modifier,
+    currentMessageMode: String,
+    onModeChange: () -> Unit,
+    onSendVoiceNote: (String) -> Unit,
+    isRecording: Boolean,
+    onRecordingChange: (Boolean) -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val recorderState = remember { mutableStateOf<MediaRecorder?>(null) }
+    var outputFile by remember { mutableStateOf<String?>(null) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
+    var willCancel by remember { mutableStateOf(false) }
+    var isLocked by remember { mutableStateOf(false) }
+    var recordingDuration by remember { mutableLongStateOf(0L) }
+    var amplitude by remember { mutableFloatStateOf(0f) }
+
+    val hasRecordPermission = remember(context) {
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (!isGranted) {
+            Toast.makeText(context, "Требуется разрешение на запись звука", Toast.LENGTH_SHORT).show()
         }
     }
-    LaunchedEffect (voiceFile) {
-        if (voiceFile?.local?.isDownloadingCompleted == false) {
-            viewModel.addFileToDownloads(voiceFile, chatId, messageId)
-        } else {
-            voiceFile?.local?.path?.let { MediaItem.fromUri(it) }
-                ?.let { exoPlayer.setMediaItem(it) }
-            exoPlayer.prepare()
-        }
-    }
 
-    LaunchedEffect(downloadedFiles.values) {
-        val downloadedFile = downloadedFiles[voiceFile?.id]
-        if (downloadedFile?.local?.isDownloadingCompleted == true) {
-            downloadedFile.local?.path?.let { MediaItem.fromUri(it) }
-                ?.let { exoPlayer.setMediaItem(it) }
-            exoPlayer.prepare()
-        }
-    }
-
-    LaunchedEffect(isPlaying) {
-        if (isPlaying) exoPlayer.play() else exoPlayer.pause()
-    }
-
-    val waveform = voiceNote?.waveform
-
-    Column(
-        modifier = Modifier.padding(16.dp)
-    ) {
-        Row {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.primary)
-                    .clickable {
-                        onPlayClicked()
+    // Timer and amplitude update
+    LaunchedEffect(isRecording) {
+        recordingDuration = 0
+        while (isRecording) {
+            delay(100)
+            recordingDuration++
+            try {
+                recorderState.value?.let { recorder ->
+                    try {
+                        amplitude = recorder.maxAmplitude.toFloat().div(32768f)
+                    } catch (e: Exception) {
+                        // Игнорируем любые ошибки получения амплитуды
+                        Log.e("VoiceRecorder", "Failed to get amplitude", e)
+                        amplitude = 0f
                     }
-            ) {
-                Icon(
-                    modifier = Modifier.align(Alignment.Center),
-                    painter = painterResource(
-                        if (isPlaying) R.drawable.baseline_pause_24 else R.drawable.baseline_play_arrow_24
-                    ),
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    contentDescription = "Управление воспроизведением"
-                )
+                }
+            } catch (e: Exception) {
+                Log.e("VoiceRecorder", "Recorder state access error", e)
+                amplitude = 0f
             }
-            Spacer(modifier = Modifier.width(16.dp))
+        }
+    }
 
-            val primaryColor = MaterialTheme.colorScheme.primaryContainer
-            val progressColor = MaterialTheme.colorScheme.primary
+    Box {
+        // Recording overlay with hint and timer
+        AnimatedVisibility(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(MaterialTheme.colorScheme.errorContainer)
+                .align(Alignment.CenterStart),
+            visible = isRecording,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp, 8.dp, 72.dp, 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Recording indicator
+                    val infiniteTransition = rememberInfiniteTransition(label = "recording")
+                    val alpha by infiniteTransition.animateFloat(
+                        initialValue = 0.2f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(500),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "alpha"
+                    )
 
-            Canvas(modifier = Modifier
-                .weight(1f)
-                .height(48.dp)) {
-                val step = size.width / (waveform?.size ?: 1)
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.error.copy(alpha = alpha))
+                    )
 
-                val progressIndex = ((waveform?.size ?: 1) * progress.floatValue).toInt()
+                    Text(
+                        text = String.format("%d:%02d", recordingDuration / 10 / 60, recordingDuration / 10 % 60),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
 
-                waveform?.forEachIndexed { index, amplitude ->
-                    val height = (amplitude / 255f) * size.height
-                    val color = if (index <= progressIndex) progressColor else primaryColor
+                    Icon(
+                        painter = painterResource(R.drawable.ic_trash),
+                        contentDescription = "Trash",
+                        modifier = Modifier.clickable {
+                            scope.launch(Dispatchers.IO) {
+                                willCancel = true
+                                recorderState.value?.let { recorder ->
+                                    outputFile?.let { filePath ->
+                                        stopRecording(recorder, filePath) { path ->
+                                            File(path).delete()
+                                        }
+                                    }
+                                }
+                                onRecordingChange(false)
+                                recorderState.value = null
+                                outputFile = null
+                            }
+                        }
+                    )
 
-                    drawLine(
-                        color = color,
-                        start = Offset(index * step, size.height / 2 - height / 2),
-                        end = Offset(index * step, size.height / 2 + height / 2),
-                        strokeWidth = 4f,
-                        cap = StrokeCap.Round
+                    Icon(
+                        painter = painterResource(R.drawable.baseline_arrow_left_24),
+                        contentDescription = "Left"
+                    )
+                    Text(
+                        text = when {
+                            isLocked -> "Запись закреплена"
+                            willCancel -> "Отпустите для отмены"
+                            else -> "Для отмены проведите пальцем"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (willCancel) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
 
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.primary)
-                    .clickable {
-                        onCloseClicked()
-                    }
-            ) {
-                Icon(
-                    modifier = Modifier.align(Alignment.Center),
-                    painter = painterResource(
-                       R.drawable.baseline_close_24
-                    ),
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    contentDescription = "Управление воспроизведением"
-                )
-            }
+        }
 
+        // Animated waveform circles
+        val errorColor = MaterialTheme.colorScheme.error
+        // Record button section
+        val animatedAmplitudes = remember {
+            List(3) { Animatable(28f) }
+        }
+
+        LaunchedEffect(amplitude) {
+            animatedAmplitudes.forEachIndexed { index, animatable ->
+                launch {
+                    animatable.animateTo(
+                        targetValue = 28f + amplitude * (index + 1) * 20,
+                        animationSpec = tween(
+                            durationMillis = 100,
+                            easing = LinearEasing
+                        )
+                    )
+                }
+            }
+        }
+
+        if (isRecording) {
+            Canvas(modifier = Modifier.align(Alignment.CenterEnd).size(56.dp)) {
+                val center = Offset(size.width / 2f, size.height / 2f)
+                animatedAmplitudes.forEachIndexed { index, animatable ->
+                    drawCircle(
+                        color = errorColor.copy(alpha = 0.3f / (index + 1)),
+                        radius = animatable.value.dp.toPx(),
+                        center = center
+                    )
+                }
+            }
+        }
+
+        // Record button
+        Box(
+            modifier = Modifier
+                .offset {
+                    IntOffset(
+                        offsetX.roundToInt(),
+                        offsetY.roundToInt()
+                    )
+                }
+                .align(Alignment.CenterEnd)
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(
+                    when {
+                        isRecording -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.primary
+                    }
+                )
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        var upBeforeTimeout = true
+
+                        try {
+                            withTimeout(300) {
+                                val up = waitForUpOrCancellation()
+                                if (up != null) {
+                                    if (isRecording) {
+                                        // Короткое нажатие во время записи - отправляем
+                                        scope.launch(Dispatchers.IO) {
+                                            stopAndSendRecording(recorderState.value, outputFile, onSendVoiceNote)
+                                            onRecordingChange(false)
+                                            recorderState.value = null
+                                            outputFile = null
+                                            isLocked = false
+                                        }
+                                    } else {
+                                        // Короткое нажатие без записи - меняем режим
+                                        onModeChange()
+                                    }
+                                }
+                            }
+                        } catch (e: PointerEventTimeoutCancellationException) {
+                            upBeforeTimeout = false
+                            // Долгое нажатие - начинаем запись если режим voice
+                            if (currentMessageMode == "voice" && !isRecording) {
+                                if (!hasRecordPermission) {
+                                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    return@awaitEachGesture
+                                }
+                                scope.launch(Dispatchers.IO) {
+                                    startRecording(context) { recorder, file ->
+                                        recorderState.value = recorder
+                                        outputFile = file.absolutePath
+                                        onRecordingChange(true)
+                                    }
+                                }
+
+                                // Отслеживаем движение пальца
+                                try {
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val position = event.changes.first()
+
+                                        if (!position.pressed) {
+                                            // Палец убрали
+                                            if (!isLocked) {
+                                                if (willCancel) {
+                                                    scope.launch(Dispatchers.IO) {
+                                                        recorderState.value?.let { recorder ->
+                                                            outputFile?.let { filePath ->
+                                                                stopRecording(recorder, filePath) { path ->
+                                                                    File(path).delete()
+                                                                }
+                                                            }
+                                                        }
+                                                        onRecordingChange(false)
+                                                        recorderState.value = null
+                                                        outputFile = null
+                                                    }
+                                                } else {
+                                                    scope.launch(Dispatchers.IO) {
+                                                        stopAndSendRecording(recorderState.value, outputFile, onSendVoiceNote)
+                                                        onRecordingChange(false)
+                                                        recorderState.value = null
+                                                        outputFile = null
+                                                    }
+                                                }
+                                            }
+                                            break
+                                        }
+
+                                        if (position.positionChanged() && !isLocked) {
+                                            val change = position.position - position.previousPosition
+                                            offsetX += change.x
+                                            offsetY += change.y
+                                            offsetX = offsetX.coerceIn(-200f, 0f)
+                                            offsetY = offsetY.coerceIn(-200f, 0f)
+
+                                            if (offsetY < -100f) {
+                                                // Закрепляем запись
+                                                isLocked = true
+                                                scope.launch {
+                                                    // Возвращаем кнопку на место
+                                                    animate(offsetX, 0f) { value, _ ->
+                                                        offsetX = value
+                                                    }
+                                                    animate(offsetY, 0f) { value, _ ->
+                                                        offsetY = value
+                                                    }
+                                                }
+                                                // Важно: НЕ делаем break здесь
+                                            } else if (offsetX < -100f) {
+                                                // Отменяем запись
+                                                willCancel = true
+                                                scope.launch(Dispatchers.IO) {
+                                                    recorderState.value?.let { recorder ->
+                                                        outputFile?.let { filePath ->
+                                                            stopRecording(recorder, filePath) { path ->
+                                                                File(path).delete()
+                                                            }
+                                                        }
+                                                    }
+                                                    onRecordingChange(false)
+                                                    recorderState.value = null
+                                                    outputFile = null
+                                                }
+                                                break
+                                            }
+                                        }
+                                        position.consume()
+                                    }
+                                } finally {
+                                    if (!isLocked) {
+                                        offsetX = 0f
+                                        offsetY = 0f
+                                        willCancel = false
+                                        onRecordingChange(false)
+                                    }
+                                }
+
+                                // Если запись закреплена, ждем нового нажатия для отправки
+                                if (isLocked) {
+                                    try {
+                                        while (true) {
+                                            val lockedEvent = awaitPointerEvent()
+                                            val lockedPosition = lockedEvent.changes.first()
+
+                                            if (!lockedPosition.pressed) {
+                                                scope.launch(Dispatchers.IO) {
+                                                    stopAndSendRecording(recorderState.value, outputFile, onSendVoiceNote)
+                                                    onRecordingChange(false)
+                                                    recorderState.value = null
+                                                    outputFile = null
+                                                    isLocked = false
+                                                    offsetX = 0f
+                                                    offsetY = 0f
+                                                }
+                                                break
+                                            }
+                                            lockedPosition.consume()
+                                        }
+                                    } finally {
+                                        if (!isLocked) {
+                                            offsetX = 0f
+                                            offsetY = 0f
+                                            willCancel = false
+                                            onRecordingChange(false)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            ) {
+            Icon(
+                painterResource(
+                    when {
+                        isRecording -> R.drawable.baseline_send_24
+                        currentMessageMode == "voice" -> R.drawable.baseline_voice_message
+                        currentMessageMode == "video" -> R.drawable.baseline_camera
+                        else -> R.drawable.baseline_send_24
+                    }
+                ),
+                contentDescription = "Запись голосового сообщения",
+                modifier = Modifier.align(Alignment.Center),
+                tint = MaterialTheme.colorScheme.onPrimary
+            )
         }
     }
+}
 
-    DisposableEffect(Unit) {
-        onDispose {
-            exoPlayer.release()
+private suspend fun stopAndSendRecording(
+    recorder: MediaRecorder?,
+    filePath: String?,
+    onSendVoiceNote: (String) -> Unit
+) {
+    recorder?.let { rec ->
+        filePath?.let { path ->
+            stopRecording(rec, path) { savedPath ->
+                onSendVoiceNote(savedPath)
+            }
         }
+    }
+}
+
+private fun startRecording(context: Context, onStart: (MediaRecorder, File) -> Unit) {
+    val file = File(context.cacheDir, "voice_${System.currentTimeMillis()}.ogg")
+    val recorder =
+        MediaRecorder(context)
+
+    recorder.apply {
+        setAudioSource(MediaRecorder.AudioSource.MIC)
+        setOutputFormat(MediaRecorder.OutputFormat.OGG)
+        setAudioEncoder(MediaRecorder.AudioEncoder.OPUS)
+        setAudioChannels(1)
+        setAudioEncodingBitRate(64000)
+        setAudioSamplingRate(16000)
+        setOutputFile(file.absolutePath)
+        prepare()
+        start()
+    }
+
+    onStart(recorder, file)
+}
+
+private fun stopRecording(recorder: MediaRecorder, filePath: String, onStop: (String) -> Unit) {
+    try {
+        recorder.stop()
+        recorder.release()
+        onStop(filePath)
+    } catch (e: Exception) {
+        Log.e("VoiceRecorder", "Stop recording failed", e)
+        throw e
     }
 }
