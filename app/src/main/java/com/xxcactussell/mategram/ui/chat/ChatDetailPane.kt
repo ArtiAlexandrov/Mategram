@@ -71,6 +71,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -213,7 +214,6 @@ fun ChatDetailPane(
     val messagesForChat by viewModel.mapOfMessages.getOrPut(chatId) {
         MutableStateFlow(mutableListOf())
     }.collectAsState()
-    var groupedMessages = groupMessagesByAlbum(messagesForChat)
     val listState = rememberLazyListState()
     val downloadedFiles by viewModel.downloadedFiles.collectAsState()
     val photo = chat?.photo?.small
@@ -246,33 +246,28 @@ fun ChatDetailPane(
 
     LaunchedEffect(listState, messagesForChat) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo }
-        .collect { visibleItems ->
-            if (visibleItems.isEmpty() || isLoadingMore) return@collect
+            .collect { visibleItems ->
+                if (visibleItems.isEmpty() || isLoadingMore) return@collect
 
-            val lastVisibleItem = visibleItems.last()
-            groupedMessages = groupMessagesByAlbum(messagesForChat)
+                val lastVisibleItem = visibleItems.last()
 
-            // Проверяем, близки ли мы к концу списка
-            if (lastVisibleItem.index >= groupedMessages.size - 5) {
-                val lastMessage = when (val item = groupedMessages.lastOrNull()) {
-                    is MediaAlbum -> item.messages.last()
-                    is TdApi.Message -> item
-                    else -> null
-                }
+                // Проверяем, близки ли мы к концу списка
+                if (lastVisibleItem.index >= messagesForChat.size - 5) {
+                    val lastMessage = messagesForChat.lastOrNull()
 
-                if (lastMessage != null) {
-                    isLoadingMore = true
-                    try {
-                        viewModel.getMessagesForChat(
-                            chatId = chatId,
-                            fromMessage = lastMessage.id
-                        )
-                    } finally {
-                        isLoadingMore = false
+                    if (lastMessage != null) {
+                        isLoadingMore = true
+                        try {
+                            viewModel.getMessagesForChat(
+                                chatId = chatId,
+                                fromMessage = lastMessage.id
+                            )
+                        } finally {
+                            isLoadingMore = false
+                        }
                     }
                 }
             }
-        }
     }
 
     LaunchedEffect(idMessageOfVoiceNote, isVoicePlaying) {
@@ -282,30 +277,22 @@ fun ChatDetailPane(
             delay(100)
 
             // Ищем текущее сообщение
-            val currentIndex = groupedMessages.indexOfFirst { message ->
-                when (message) {
-                    is TdApi.Message -> {
-                        val found = message.id == idMessageOfVoiceNote
-                        if (found) Log.d("VoiceNote", "Found current message at index")
-                        found
-                    }
-                    else -> false
-                }
+            val currentIndex = messagesForChat.indexOfFirst { message ->
+                val found = message.id == idMessageOfVoiceNote
+                if (found) Log.d("VoiceNote", "Found current message at index")
+                found
             }
 
             if (currentIndex != -1) {
                 // Ищем следующее голосовое сообщение в обратном направлении
-                val nextVoiceNote = groupedMessages.take(currentIndex).reversed().firstOrNull { message ->
-                    when (message) {
-                        is TdApi.Message -> {
-                            val isVoiceNote = message.content is MessageVoiceNote &&
-                                    !(message.content as MessageVoiceNote).isListened
-                            if (isVoiceNote) Log.d("VoiceNote", "Found next unlistened voice note: ${message.id}")
-                            isVoiceNote
-                        }
-                        is MediaAlbum -> false
-                        else -> false
-                    }
+                val nextVoiceNote = messagesForChat.take(currentIndex).reversed().firstOrNull { message ->
+                    val isVoiceNote = message.content is MessageVoiceNote &&
+                            !(message.content as MessageVoiceNote).isListened
+                    if (isVoiceNote) Log.d(
+                        "VoiceNote",
+                        "Found next unlistened voice note: ${message.id}"
+                    )
+                    isVoiceNote
                 }
 
                 if (nextVoiceNote is TdApi.Message && nextVoiceNote.content is MessageVoiceNote) {
@@ -454,153 +441,273 @@ fun ChatDetailPane(
                 modifier = Modifier.fillMaxSize(),
                 reverseLayout = true
             ) {
-                items(groupedMessages.size) { index ->
+
+                val currentAlbumMessages = mutableListOf<TdApi.Message>()
+
+                items(messagesForChat.size) { index ->
                     var isDateShown by remember { mutableStateOf(false) }
                     var date by remember { mutableStateOf("") }
                     var dateToCompare by remember { mutableLongStateOf(0L) }
                     var nextDateToCompare by remember { mutableLongStateOf(0L) }
+
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    val messageId = if(groupedMessages[index] is MediaAlbum) {
-                        (groupedMessages[index] as MediaAlbum).id
-                    } else {
-                        (groupedMessages[index] as TdApi.Message).id
-                    }
+                    val message = messagesForChat[index]
+                    val nextMessage = if (index + 1 < messagesForChat.size) messagesForChat[index + 1] else null
 
-                    val isOutgoing = if(groupedMessages[index] is MediaAlbum) {
-                        (groupedMessages[index] as MediaAlbum).isOutgoing
-                    } else {
-                        (groupedMessages[index] as TdApi.Message).isOutgoing
-                    }
-
-                    val replyTo = if(groupedMessages[index] is MediaAlbum) {
-                        (groupedMessages[index] as MediaAlbum).replyTo
-                    } else {
-                        (groupedMessages[index] as TdApi.Message).replyTo
-                    }
-
-                    val dateMessage = if (groupedMessages[index] is MediaAlbum) {
-                        convertUnixTimestampToDate(
-                            (groupedMessages[index] as MediaAlbum).date.toLong()
-                        )
-                    } else {
-                        convertUnixTimestampToDate(
-                            (groupedMessages[index] as TdApi.Message).date.toLong()
-                        )
-                    }
-
-                    DraggableBox(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        onDragComplete = {
-                            inputMessageToReply =
-                                TdApi.InputMessageReplyToMessage(messageId, null)
-                            messageIdToReply = messageId
+                    if (message.mediaAlbumId != 0L) {
+                        // Part of an album - collect messages
+                        if (currentAlbumMessages.isEmpty() || currentAlbumMessages[0].mediaAlbumId == message.mediaAlbumId) {
+                            currentAlbumMessages.add(message)
                         }
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalAlignment = if (!isOutgoing) Alignment.Start else Alignment.End
-                        ) {
-                            Card(
+
+                        // Check if this is the last message in album
+                        if (nextMessage?.mediaAlbumId != message.mediaAlbumId) {
+                            // Display complete album
+                            val album = MediaAlbum(
+                                messages = currentAlbumMessages.toList(),
+                                isOutgoing = currentAlbumMessages[0].isOutgoing,
+                                replyTo = currentAlbumMessages.firstOrNull { it.replyTo != null }?.replyTo,
+                                date = currentAlbumMessages[0].date,
+                                id = currentAlbumMessages[0].id
+                            )
+
+                            DraggableBox(
                                 modifier = Modifier
-                                    .widthIn(max = 320.dp)
-                                    .clip(RoundedCornerShape(24.dp))
-                                    .clickable {
-                                        isDateShown = !isDateShown
-                                        date = dateMessage
-                                    },
-                                shape = RoundedCornerShape(24.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = if (!isOutgoing)
-                                        MaterialTheme.colorScheme.inversePrimary
-                                    else
-                                        MaterialTheme.colorScheme.surfaceVariant
-                                ),
-                            ) {
-                                if (replyTo != null) {
-                                    Card(modifier = Modifier
-                                        .padding(8.dp, 8.dp, 8.dp, 0.dp)
-                                        .height(32.dp),
-                                        shape = RoundedCornerShape(16.dp),
-                                        colors = CardDefaults.cardColors(
-                                            containerColor = MaterialTheme.colorScheme.surfaceContainer
-                                        )) {
-                                        RepliedMessage(
-                                            replyTo = replyTo,
-                                            viewModel = viewModel,
-                                            onClick = { }
-                                        )
-                                    }
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp),
+                                onDragComplete = {
+                                    inputMessageToReply = TdApi.InputMessageReplyToMessage(album.id, null)
+                                    messageIdToReply = album.id
                                 }
-                                when (val item = groupedMessages[index]) {
-                                    is MediaAlbum -> {
-                                        MediaCarousel(
-                                            album = item,
-                                            viewModel = viewModel,
-                                            onMediaClick = { message ->
-                                                selectedMessageId = message.id
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalAlignment = if (!album.isOutgoing) Alignment.Start else Alignment.End
+                                ) {
+                                    Card(
+                                        modifier = Modifier
+                                            .widthIn(max = 320.dp)
+                                            .clip(RoundedCornerShape(24.dp))
+                                            .clickable {
+                                                isDateShown = !isDateShown
+                                                date = convertUnixTimestampToDate(album.date.toLong())
                                             },
+                                        shape = RoundedCornerShape(24.dp),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (!album.isOutgoing)
+                                                MaterialTheme.colorScheme.inversePrimary
+                                            else
+                                                MaterialTheme.colorScheme.surfaceVariant
+                                        )
+                                    ) {
+                                        if (album.replyTo != null) {
+                                            Card(
+                                                modifier = Modifier
+                                                    .padding(8.dp)
+                                                    .height(32.dp)
+                                                    .clickable {
+                                                        scope.launch {
+                                                            if (album.replyTo !is MessageReplyToMessage) return@launch
+
+                                                            // Сначала ищем сообщение в текущем списке
+                                                            val indexReply = messagesForChat.indexOfFirst { it.id == album.replyTo.messageId }
+                                                            if (indexReply != -1) {
+                                                                // Сообщение найдено, прокручиваем к нему
+                                                                listState.animateScrollToItem(indexReply)
+                                                                return@launch
+                                                            }
+
+                                                            // Если сообщение не найдено, начинаем загрузку
+                                                            isLoadingMore = true
+                                                            try {
+                                                                var lastMessageId = messagesForChat.lastOrNull()?.id
+                                                                while (lastMessageId != null && !isLoadingMore) {
+                                                                    // Загружаем следующую порцию сообщений
+                                                                    viewModel.getMessagesForChat(
+                                                                        chatId = chatId,
+                                                                        fromMessage = lastMessageId
+                                                                    )
+
+                                                                    // Проверяем, появилось ли нужное сообщение
+                                                                    val newIndex = messagesForChat.indexOfFirst { it.id == album.replyTo.messageId }
+                                                                    if (newIndex != -1) {
+                                                                        // Нашли сообщение, прокручиваем к нему
+                                                                        listState.animateScrollToItem(newIndex)
+                                                                        break
+                                                                    }
+
+                                                                    // Если достигли конца и сообщение не найдено
+                                                                    if (listState.isLastItemVisible()) {
+                                                                        lastMessageId = messagesForChat.lastOrNull()?.id
+                                                                    } else {
+                                                                        break
+                                                                    }
+
+                                                                    delay(100) // Небольшая задержка между загрузками
+                                                                }
+                                                            } finally {
+                                                                isLoadingMore = false
+                                                            }
+                                                        }
+                                                    },
+                                                shape = RoundedCornerShape(16.dp),
+                                                colors = CardDefaults.cardColors(
+                                                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                                                )
+                                            ) {
+                                                RepliedMessage(
+                                                    replyTo = album.replyTo,
+                                                    viewModel = viewModel,
+                                                    onClick = { }
+                                                )
+                                            }
+                                        }
+                                        MediaCarousel(
+                                            album = album,
+                                            viewModel = viewModel,
+                                            onMediaClick = { message -> selectedMessageId = message.id },
                                             downloadedFiles = downloadedFiles
                                         )
                                     }
-                                    is TdApi.Message -> {
-                                        MessageItem(
-                                            onMediaClick = { id ->
-                                                selectedMessageId = id
-                                            },
-                                            viewModel = viewModel,
-                                            idMessageOfVoiceNote = idMessageOfVoiceNote,
-                                            messageId = messageId,
-                                            isVoicePlaying = isVoicePlaying,
-                                            chatId = chatId,
-                                            onTogglePlay = { messageId, content, chatId ->
-                                                onTogglePlay(messageId, content, chatId)
-                                            },
-                                            item = item
+                                    if (isDateShown) {
+                                        Text(
+                                            modifier = Modifier.padding(16.dp),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            text = date
                                         )
                                     }
                                 }
                             }
-                            if (isDateShown) {
-                                Text(
-                                    modifier = Modifier.padding(16.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    text = date,
-                                )
+                            currentAlbumMessages.clear()
+                        }
+                    } else {
+                        // Single message
+                        if (currentAlbumMessages.isNotEmpty()) {
+                            currentAlbumMessages.clear()
+                        }
+
+                        DraggableBox(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            onDragComplete = {
+                                inputMessageToReply = TdApi.InputMessageReplyToMessage(message.id, null)
+                                messageIdToReply = message.id
+                            }
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalAlignment = if (!message.isOutgoing) Alignment.Start else Alignment.End
+                            ) {
+                                Card(
+                                    modifier = Modifier
+                                        .widthIn(max = 320.dp)
+                                        .clip(RoundedCornerShape(24.dp))
+                                        .clickable {
+                                            isDateShown = !isDateShown
+                                            date = convertUnixTimestampToDate(message.date.toLong())
+                                        },
+                                    shape = RoundedCornerShape(24.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (!message.isOutgoing)
+                                            MaterialTheme.colorScheme.inversePrimary
+                                        else
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                    )
+                                ) {
+                                    if (message.replyTo is MessageReplyToMessage) {
+                                        Card(
+                                            modifier = Modifier
+                                                .padding(8.dp)
+                                                .height(32.dp)
+                                                .clickable {
+                                                    scope.launch {
+                                                        if (message.replyTo !is MessageReplyToMessage) return@launch
+
+                                                        // Сначала ищем сообщение в текущем списке
+                                                        val indexReply = messagesForChat.indexOfFirst { it.id == (message.replyTo as MessageReplyToMessage).messageId }
+                                                        if (indexReply != -1) {
+                                                            // Сообщение найдено, прокручиваем к нему
+                                                            listState.animateScrollToItem(indexReply)
+                                                            return@launch
+                                                        }
+
+                                                        // Если сообщение не найдено, начинаем загрузку
+                                                        isLoadingMore = true
+                                                        try {
+                                                            var lastMessageId = messagesForChat.lastOrNull()?.id
+                                                            while (lastMessageId != null && !isLoadingMore) {
+                                                                // Загружаем следующую порцию сообщений
+                                                                viewModel.getMessagesForChat(
+                                                                    chatId = chatId,
+                                                                    fromMessage = lastMessageId!!
+                                                                )
+
+                                                                // Проверяем, появилось ли нужное сообщение
+                                                                val newIndex = messagesForChat.indexOfFirst { it.id == (message.replyTo as MessageReplyToMessage).messageId }
+                                                                if (newIndex != -1) {
+                                                                    // Нашли сообщение, прокручиваем к нему
+                                                                    listState.animateScrollToItem(newIndex)
+                                                                    break
+                                                                }
+
+                                                                // Если достигли конца и сообщение не найдено
+                                                                if (listState.isLastItemVisible()) {
+                                                                    lastMessageId = messagesForChat.lastOrNull()?.id
+                                                                } else {
+                                                                    break
+                                                                }
+
+                                                                delay(100) // Небольшая задержка между загрузками
+                                                            }
+                                                        } finally {
+                                                            isLoadingMore = false
+                                                        }
+                                                    }
+                                                },
+                                            shape = RoundedCornerShape(16.dp),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainer
+                                            )
+                                        ) {
+                                            RepliedMessage(
+                                                replyTo = message.replyTo as MessageReplyToMessage,
+                                                viewModel = viewModel,
+                                                onClick = { }
+                                            )
+                                        }
+                                    }
+                                    MessageItem(
+                                        onMediaClick = { id -> selectedMessageId = id },
+                                        viewModel = viewModel,
+                                        idMessageOfVoiceNote = idMessageOfVoiceNote,
+                                        messageId = message.id,
+                                        isVoicePlaying = isVoicePlaying,
+                                        chatId = chatId,
+                                        onTogglePlay = { msgId, content, chatId ->
+                                            onTogglePlay(msgId, content, chatId)
+                                        },
+                                        item = message
+                                    )
+                                }
+                                if (isDateShown) {
+                                    Text(
+                                        modifier = Modifier.padding(16.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        text = date
+                                    )
+                                }
                             }
                         }
                     }
+
+                    // Date separator logic
                     try {
-                        when (groupedMessages[index]) {
-                            is MediaAlbum -> {
-                                dateToCompare = getDayFromDate(
-                                    (groupedMessages[index] as MediaAlbum).date.toLong()
-                                )
-                            }
-
-                            is TdApi.Message -> {
-                                dateToCompare = getDayFromDate(
-                                    (groupedMessages[index] as TdApi.Message).date.toLong()
-                                )
-                            }
-                        }
-                        when (groupedMessages[index + 1]) {
-                            is MediaAlbum -> {
-                                nextDateToCompare = getDayFromDate(
-                                    (groupedMessages[index + 1] as MediaAlbum).date.toLong()
-                                )
-                            }
-
-                            is TdApi.Message -> {
-                                nextDateToCompare = getDayFromDate(
-                                    (groupedMessages[index + 1] as TdApi.Message).date.toLong()
-                                )
-                            }
-                        }
-                    } catch (e: IndexOutOfBoundsException) {
-                        // Игнорируем ошибку выхода за пределы массива
+                        dateToCompare = getDayFromDate(message.date.toLong())
+                        nextDateToCompare = nextMessage?.let { getDayFromDate(it.date.toLong()) } ?: 0L
+                    } catch (e: Exception) {
+                        // Ignore date parsing errors
                     }
                     if (nextDateToCompare < dateToCompare) {
                         Spacer(modifier = Modifier.height(8.dp))
@@ -747,6 +854,18 @@ fun ChatDetailPane(
     }
 }
 
+fun LazyListState.isLastItemVisible(): Boolean {
+    val layoutInfo = layoutInfo
+    val visibleItemsInfo = layoutInfo.visibleItemsInfo
+    return if (visibleItemsInfo.isEmpty()) {
+        false
+    } else {
+        val lastVisibleItem = visibleItemsInfo.last()
+        val lastItem = layoutInfo.totalItemsCount - 1
+        lastVisibleItem.index == lastItem
+    }
+}
+
 @Composable
 fun RepliedMessage(replyTo: TdApi.MessageReplyTo, viewModel: MainViewModel, onClick: () -> Unit) {
     var messageToReply by remember { mutableStateOf<TdApi.Message?>(null) }
@@ -853,85 +972,8 @@ fun RepliedMessage(replyTo: TdApi.MessageReplyTo, viewModel: MainViewModel, onCl
     }
 }
 
-private fun groupMessagesByAlbum(messages: List<TdApi.Message>): List<Any> {
-    val result = mutableListOf<Any>()
-    var currentAlbumMessages = mutableListOf<TdApi.Message>()
-
-    messages.forEach { message ->
-        if (message.mediaAlbumId != 0L) {
-            if (currentAlbumMessages.isEmpty() ||
-                currentAlbumMessages[0].mediaAlbumId == message.mediaAlbumId
-            ) {
-                currentAlbumMessages.add(message)
-            } else {
-                if (currentAlbumMessages.size > 1) {
-                    val isOutgoing = currentAlbumMessages[0].isOutgoing
-                    val date = currentAlbumMessages[0].date
-                    val id = currentAlbumMessages[0].id
-                    // Находим первое сообщение с replyTo в альбоме
-                    val replyTo = currentAlbumMessages.firstOrNull { it.replyTo != null }?.replyTo
-                    result.add(MediaAlbum(
-                        messages = currentAlbumMessages.toList(),
-                        isOutgoing = isOutgoing,
-                        replyTo = replyTo,
-                        date = date,
-                        id = id
-                    ))
-                } else {
-                    result.add(currentAlbumMessages[0])
-                }
-                currentAlbumMessages = mutableListOf(message)
-            }
-        } else {
-            if (currentAlbumMessages.isNotEmpty()) {
-                if (currentAlbumMessages.size > 1) {
-                    val isOutgoing = currentAlbumMessages[0].isOutgoing
-                    val date = currentAlbumMessages[0].date
-                    val id = currentAlbumMessages[0].id
-                    // Находим первое сообщение с replyTo в альбоме
-                    val replyTo = currentAlbumMessages.firstOrNull { it.replyTo != null }?.replyTo
-                    result.add(MediaAlbum(
-                        messages = currentAlbumMessages.toList(),
-                        isOutgoing = isOutgoing,
-                        replyTo = replyTo,
-                        date = date,
-                        id = id
-                    ))
-                } else {
-                    result.add(currentAlbumMessages[0])
-                }
-                currentAlbumMessages = mutableListOf()
-            }
-            result.add(message)
-        }
-    }
-
-    if (currentAlbumMessages.isNotEmpty()) {
-        if (currentAlbumMessages.size > 1) {
-            val isOutgoing = currentAlbumMessages[0].isOutgoing
-            val date = currentAlbumMessages[0].date
-            val id = currentAlbumMessages[0].id
-            // Находим первое сообщение с replyTo в альбоме
-            val replyTo = currentAlbumMessages.firstOrNull { it.replyTo != null }?.replyTo
-            result.add(MediaAlbum(
-                messages = currentAlbumMessages.toList(),
-                isOutgoing = isOutgoing,
-                replyTo = replyTo,
-                date = date,
-                id = id
-            ))
-        } else {
-            result.add(currentAlbumMessages[0])
-        }
-    }
-
-    return result
-}
-
-// Создадим класс для хранения альбома
 data class MediaAlbum(val messages: List<TdApi.Message>, val isOutgoing: Boolean, val replyTo: TdApi.MessageReplyTo?, val date: Int, val id: Long)
 
-// Создадим Composable для отображения карусели
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MediaCarousel(
@@ -1976,7 +2018,6 @@ private fun MessageItem(
                     modifier = Modifier
                         .width(320.dp)
                         .height(320.dp)
-                        .clip(RoundedCornerShape(24.dp))
                 ) {
                     AsyncImage(
                         model = thumbnailPath,
@@ -2045,7 +2086,6 @@ private fun MessageItem(
                     modifier = Modifier
                         .width(320.dp)
                         .heightIn(max = 320.dp)
-                        .clip(RoundedCornerShape(24.dp))
                         .clickable {
                             onMediaClick(item.id)
                         }
