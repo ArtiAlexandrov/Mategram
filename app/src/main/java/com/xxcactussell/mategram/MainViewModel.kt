@@ -45,6 +45,7 @@ import com.xxcactussell.mategram.notifications.FcmManager
 import com.xxcactussell.mategram.notifications.NotificationHelper
 import com.xxcactussell.mategram.notifications.NotificationSettingsManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -60,6 +61,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import org.drinkless.tdlib.TdApi
 import org.drinkless.tdlib.TdApi.Chat
@@ -654,16 +656,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun getMessageById(replyMessage: TdApi.MessageReplyToMessage): TdApi.Message? {
-        var message: TdApi.Message? = null
-        try {
-            api.client?.send(TdApi.GetMessage(replyMessage.chatId, replyMessage.messageId)) { response ->
-                message = (response as TdApi.Message)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    suspend fun getMessageById(replyMessage: TdApi.MessageReplyToMessage): TdApi.Message? {
+        return try {
+            suspendCancellableCoroutine { continuation ->
+                api.client?.send(TdApi.GetMessage(replyMessage.chatId, replyMessage.messageId)) { response ->
+                    if (response is TdApi.Message) {
+                        continuation.resume(response) { }
+                    } else {
+                        continuation.resume(null) { }
+                    }
+                }
             }
-        } catch (e: TelegramException) {
-            message = null
+        } catch (e: Exception) {
+            Log.e("getMessageById", "Error getting message", e)
+            null
         }
-        return message
     }
 
     fun handleNotificationOpen(chatId: Long) {

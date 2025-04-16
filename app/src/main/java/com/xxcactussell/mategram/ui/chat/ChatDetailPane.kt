@@ -166,6 +166,7 @@ import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.animateLottieCompositionAsState
 import com.airbnb.lottie.compose.rememberLottieComposition
 import com.xxcactussell.mategram.getMimeType
+import com.xxcactussell.mategram.kotlinx.telegram.core.convertUnixTimestampToDate
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
@@ -479,11 +480,11 @@ fun ChatDetailPane(
                     }
 
                     val dateMessage = if (groupedMessages[index] is MediaAlbum) {
-                        convertUnixTimestampToDateByDay(
+                        convertUnixTimestampToDate(
                             (groupedMessages[index] as MediaAlbum).date.toLong()
                         )
                     } else {
-                        convertUnixTimestampToDateByDay(
+                        convertUnixTimestampToDate(
                             (groupedMessages[index] as TdApi.Message).date.toLong()
                         )
                     }
@@ -502,13 +503,6 @@ fun ChatDetailPane(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalAlignment = if (!isOutgoing) Alignment.Start else Alignment.End
                         ) {
-                            RepliedMessage(
-                                replyTo = replyTo,
-                                viewModel = viewModel,
-                                onClick = {
-
-                                }
-                            )
                             Card(
                                 modifier = Modifier
                                     .widthIn(max = 320.dp)
@@ -525,6 +519,19 @@ fun ChatDetailPane(
                                         MaterialTheme.colorScheme.surfaceVariant
                                 ),
                             ) {
+                                if (replyTo != null) {
+                                    Card(modifier = Modifier.padding(8.dp, 8.dp, 8.dp, 0.dp).height(32.dp),
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                                        )) {
+                                        RepliedMessage(
+                                            replyTo = replyTo,
+                                            viewModel = viewModel,
+                                            onClick = { }
+                                        )
+                                    }
+                                }
                                 when (val item = groupedMessages[index]) {
                                     is MediaAlbum -> {
                                         MediaCarousel(
@@ -1185,79 +1192,102 @@ fun ChatDetailPane(
 }
 
 @Composable
-fun RepliedMessage(replyTo: TdApi.MessageReplyTo?, viewModel: MainViewModel, onClick: () -> Unit) {
-    if (replyTo != null) {
-        var messageToReply by remember { mutableStateOf<TdApi.Message?>(null) }
-        var messageContent by remember { mutableStateOf<MessageContent?>(null) }
-        var messageTextToReply by remember { mutableStateOf<String?>(null) }
-        LaunchedEffect(replyTo) {
-            if (replyTo is MessageReplyToMessage) {
-                messageToReply = viewModel.getMessageById(replyTo)
-            }
-            messageContent = messageToReply?.let { getMessageContent(it.chatId, it.id, viewModel) }
-            messageTextToReply = messageContent?.textForReply ?: "Контент недоступен"
-        }
+fun RepliedMessage(replyTo: TdApi.MessageReplyTo, viewModel: MainViewModel, onClick: () -> Unit) {
+    var messageToReply by remember { mutableStateOf<TdApi.Message?>(null) }
+    var messageContent by remember { mutableStateOf<MessageContent?>(null) }
+    var messageTextToReply by remember { mutableStateOf<String?>(null) }
+    var replyTitle by remember { mutableStateOf("") }
 
-        var replyTitle by remember { mutableStateOf("") }
-        LaunchedEffect(messageToReply) {
-            if (messageToReply != null) {
-                if (messageToReply!!.senderId is TdApi.MessageSenderChat) {
-                    val chatReply =
-                        api.getChat((messageToReply!!.senderId as TdApi.MessageSenderChat).chatId)
-                    replyTitle = chatReply.title
-                } else if (messageToReply!!.senderId is TdApi.MessageSenderUser) {
-                    // Получаем информацию о пользователе
-                    val userId =
-                        (messageToReply!!.senderId as TdApi.MessageSenderUser).userId
-                    val user = api.getUser(userId)
-                    replyTitle =
-                        user.firstName + " " + user.lastName
-                    // Извлекаем имя и фамилию пользователя
-                }
-            } else {
-                replyTitle = "Удаленное сообщение"
-            }
-        }
-        Row(
-            modifier = Modifier
-                .widthIn(max = 200.dp)
-                .clickable {
-                    onClick()
-                }
-        ) {
-            Column {
-                Text(
-                    text = replyTitle,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Row {
-                    messageContent?.thumbnail?.let {
-                        ByteArrayImage(
-                            imageData = it,
-                            contentDescription = "Медиа в ответе",
-                            modifier = Modifier
-                                .size(16.dp)
-                                .clip(RoundedCornerShape(4.dp)),
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                    }
-                    if (messageTextToReply != null) {
-                        Text(
-                            text = messageTextToReply!!,
-                            style = MaterialTheme.typography.labelMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+    LaunchedEffect(replyTo) {
+        if (replyTo is MessageReplyToMessage) {
+            try {
+                val chatId = replyTo.chatId
+                val messageId = replyTo.messageId
+                messageToReply = viewModel.getMessageById(replyTo)
+
+                if (messageToReply != null) {
+                    // Получаем контент сообщения
+                    messageContent = getMessageContent(chatId, messageId, viewModel)
+                    messageTextToReply = messageContent?.textForReply
+
+                    // Получаем имя отправителя
+                    when (val sender = messageToReply!!.senderId) {
+                        is TdApi.MessageSenderChat -> {
+                            val chatReply = api.getChat(sender.chatId)
+                            replyTitle = chatReply.title
+                        }
+                        is TdApi.MessageSenderUser -> {
+                            val user = api.getUser(sender.userId)
+                            replyTitle = "${user.firstName} ${user.lastName}".trim()
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                Log.e("RepliedMessage", "Error loading reply message", e)
             }
         }
     }
-    Spacer(modifier = Modifier.height(4.dp))
-}
+    Row(
+        modifier = Modifier
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
 
+        Icon(
+            painter = painterResource(R.drawable.baseline_reply_24),
+            contentDescription = "Reply"
+        )
+
+        Spacer(modifier = Modifier.width(4.dp))
+
+        if (replyTitle.isNotEmpty()) {
+            Text(
+                text = replyTitle,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    color = MaterialTheme.colorScheme.primary
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Box(modifier = Modifier.clip(
+                CircleShape).background(MaterialTheme.colorScheme.onSurface).size(4.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+        } else {
+            Text(
+                text = "Сообщение удалено",
+                style = MaterialTheme.typography.labelMedium.copy(
+                    color = MaterialTheme.colorScheme.primary
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Box(modifier = Modifier.clip(
+                CircleShape).background(MaterialTheme.colorScheme.onSurface).size(4.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+        }
+
+        messageContent?.thumbnail?.let {
+            ByteArrayImage(
+                imageData = it,
+                contentDescription = "Медиа в ответе",
+                modifier = Modifier
+                    .size(16.dp)
+                    .clip(RoundedCornerShape(4.dp))
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+        }
+
+        Text(
+            text = messageTextToReply ?: "Контент недоступен",
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
 
 private fun groupMessagesByAlbum(messages: List<TdApi.Message>): List<Any> {
     val result = mutableListOf<Any>()
