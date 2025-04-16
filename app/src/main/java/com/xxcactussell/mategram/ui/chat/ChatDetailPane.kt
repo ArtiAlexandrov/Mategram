@@ -520,7 +520,9 @@ fun ChatDetailPane(
                                 ),
                             ) {
                                 if (replyTo != null) {
-                                    Card(modifier = Modifier.padding(8.dp, 8.dp, 8.dp, 0.dp).height(32.dp),
+                                    Card(modifier = Modifier
+                                        .padding(8.dp, 8.dp, 8.dp, 0.dp)
+                                        .height(32.dp),
                                         shape = RoundedCornerShape(16.dp),
                                         colors = CardDefaults.cardColors(
                                             containerColor = MaterialTheme.colorScheme.surfaceContainer
@@ -544,466 +546,20 @@ fun ChatDetailPane(
                                         )
                                     }
                                     is TdApi.Message -> {
-                                        when (val content = item.content) {
-                                            is MessageText -> {
-                                                val formattedText = content.text
-                                                Text(
-                                                    modifier = Modifier.padding(16.dp),
-                                                    text = getAnnotatedString(formattedText),
-                                                    style = MaterialTheme.typography.bodyMedium
-                                                )
-                                            }
-                                            is MessageVideo -> {
-                                                val videoContent = content.video
-                                                val thumbnailFile = (videoContent as Video).thumbnail?.file
-                                                var thumbnailPath by remember { mutableStateOf<String?>(null) }
-                                                val caption = content.caption
-
-
-                                                LaunchedEffect(thumbnailFile) {
-                                                    if (thumbnailFile?.local?.isDownloadingCompleted == false) {
-                                                        viewModel.downloadFile(thumbnailFile)
-                                                    } else {
-                                                        thumbnailPath = thumbnailFile?.local?.path
-                                                    }
-                                                }
-
-                                                LaunchedEffect(downloadedFiles.values) {
-                                                    val downloadedFile = downloadedFiles[thumbnailFile?.id]
-                                                    if (downloadedFile?.local?.isDownloadingCompleted == true) {
-                                                        thumbnailPath = downloadedFile.local?.path
-                                                    }
-                                                }
-
-
-                                                Column {
-
-                                                    if (caption.text != "" && content.showCaptionAboveMedia) {
-                                                        Text(
-                                                            modifier = Modifier.padding(16.dp),
-                                                            text = getAnnotatedString(caption),
-                                                            style = MaterialTheme.typography.bodyMedium
-                                                        )
-                                                    }
-
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .width(320.dp)
-                                                            .height(320.dp)
-                                                            .clip(RoundedCornerShape(24.dp))
-                                                    ) {
-                                                        AsyncImage(
-                                                            model = thumbnailPath,
-                                                            contentDescription = "Видео превью",
-                                                            contentScale = ContentScale.Crop,
-                                                            modifier = Modifier.fillMaxSize()
-                                                        )
-                                                        IconButton(
-                                                            onClick = {
-                                                                selectedMessageId = item.id
-                                                            },
-                                                            modifier = Modifier.align(Alignment.Center)
-                                                        ) {
-                                                            Icon(
-                                                                painter = painterResource(R.drawable.baseline_play_arrow_24),
-                                                                contentDescription = "Запустить видео",
-                                                                modifier = Modifier.size(64.dp),
-                                                                tint = Color.White
-                                                            )
-                                                        }
-                                                    }
-
-                                                    if (caption.text != "" && !content.showCaptionAboveMedia) {
-                                                        Text(
-                                                            modifier = Modifier.padding(16.dp),
-                                                            text = getAnnotatedString(caption),
-                                                            style = MaterialTheme.typography.bodyMedium
-                                                        )
-                                                    }
-
-                                                }
-                                            }
-                                            is MessagePhoto -> {
-                                                val photoInChat = content.photo?.sizes?.lastOrNull()?.photo
-                                                var photoPath by remember { mutableStateOf(photo?.local?.path) }
-
-                                                LaunchedEffect(photoInChat) {
-                                                    if (photoInChat?.local?.isDownloadingCompleted == false) {
-                                                        viewModel.downloadFile(photoInChat)
-                                                    } else {
-                                                        photoPath = photoInChat?.local?.path
-                                                    }
-                                                }
-
-                                                LaunchedEffect(downloadedFiles.values) {
-                                                    val downloadedFile = downloadedFiles[photoInChat?.id]
-                                                    if (downloadedFile?.local?.isDownloadingCompleted == true) {
-                                                        photoPath = downloadedFile.local?.path
-                                                    }
-                                                }
-
-                                                val caption = content.caption
-
-                                                Column {
-                                                    if (caption.text != "" && content.showCaptionAboveMedia) {
-                                                        Text(
-                                                            modifier = Modifier.padding(16.dp),
-                                                            text = getAnnotatedString(caption),
-                                                            style = MaterialTheme.typography.bodyMedium
-                                                        )
-                                                    }
-                                                    AsyncImage(
-                                                        model = photoPath,
-                                                        contentDescription = "Фото сообщения",
-                                                        contentScale = ContentScale.Crop,
-                                                        modifier = Modifier
-                                                            .width(320.dp)
-                                                            .heightIn(max = 320.dp)
-                                                            .clip(RoundedCornerShape(24.dp))
-                                                            .clickable {
-                                                                selectedMessageId = item.id
-                                                            }
-                                                    )
-                                                    if (caption.text != "" && !content.showCaptionAboveMedia) {
-                                                        Text(
-                                                            modifier = Modifier.padding(16.dp),
-                                                            text = getAnnotatedString(caption),
-                                                            style = MaterialTheme.typography.bodyMedium
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                            is MessageDocument -> {
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .padding(16.dp)
-                                                ) {
-                                                    val document = content.document.document
-                                                    val downloadedSize = downloadedFiles[document.id]?.local?.downloadedSize ?: 0L
-                                                    val downloadProgress = downloadedSize.toFloat() / document.expectedSize.toFloat()
-                                                    val documentThumbnail = content.document.thumbnail?.file
-                                                    var documentThumbnailPath by remember { mutableStateOf(documentThumbnail?.local?.path) }
-                                                    val documentName = content.document?.fileName.toString()
-                                                    val uploadedSize by remember { mutableStateOf<String?>(formatFileSize(document?.expectedSize?.toInt() ?: 0)) }
-                                                    var isDownloading by remember { mutableStateOf(false) }
-                                                    var isFileDownloaded by remember { mutableStateOf(false) }
-
-                                                    LaunchedEffect(documentThumbnail) {
-                                                        if(documentThumbnail?.local?.isDownloadingCompleted == false) {
-                                                            viewModel.addFileToDownloads(documentThumbnail, chatId, messageId)
-                                                        } else {
-                                                            documentThumbnailPath = documentThumbnail?.local?.path
-                                                        }
-                                                    }
-
-                                                    LaunchedEffect(document) {
-                                                        if(document.local.isDownloadingCompleted) {
-                                                            isFileDownloaded = true
-                                                        }
-                                                    }
-
-                                                    LaunchedEffect(downloadedFiles.values) {
-                                                        val downloadedFile = downloadedFiles[documentThumbnail?.id]
-                                                        if (downloadedFile?.local?.isDownloadingCompleted == true) {
-                                                            documentThumbnailPath = downloadedFile.local.path
-                                                        }
-                                                    }
-
-
-                                                    LaunchedEffect(downloadedFiles.values) {
-                                                        val downloadedFile = downloadedFiles[document?.id]
-                                                        if (downloadedFile?.local?.isDownloadingCompleted == true) {
-                                                            isFileDownloaded = true
-                                                            isDownloading = false
-                                                        }
-                                                    }
-
-                                                    val context = LocalContext.current
-
-                                                    val onDownloadClick: () -> Unit = {
-                                                        scope.launch {
-                                                            if (!isFileDownloaded) {
-                                                                isDownloading = true
-                                                                viewModel.addFileToDownloads(document, chatId, messageId)
-                                                            } else {
-                                                                val mimeType = getMimeType(documentName)
-                                                                val filePath = document.local.path
-
-                                                                if (viewModel.isApkFile(filePath)) {
-                                                                    val canInstall = context.packageManager.canRequestPackageInstalls()
-                                                                    if (!canInstall) {
-                                                                        val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
-                                                                            data = Uri.parse("package:${context.packageName}")
-                                                                        }
-                                                                        context.startActivity(intent) // Открываем настройки для разрешения
-                                                                        return@launch
-                                                                    }
-                                                                    viewModel.installApk(context, filePath)
-                                                                } else {
-                                                                    val fileUri = FileProvider.getUriForFile(
-                                                                        context,
-                                                                        "${context.packageName}.provider",
-                                                                        File(filePath)
-                                                                    )
-
-                                                                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                                                                        setDataAndType(fileUri, mimeType)
-                                                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                                    }
-
-                                                                    try {
-                                                                        context.startActivity(intent)
-                                                                    } catch (e: ActivityNotFoundException) {
-                                                                        Toast.makeText(context, "Нет приложения для открытия файла", Toast.LENGTH_SHORT).show()
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-
-
-                                                    // Отображение в зависимости от состояния файла
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(80.dp)
-                                                            .clip(RoundedCornerShape(16.dp))
-                                                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                                                            .clickable { onDownloadClick() }, // Клик для загрузки
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        when {
-                                                            isDownloading -> {
-                                                                CircularProgressIndicator(
-                                                                    progress = { downloadProgress },
-                                                                    modifier = Modifier.size(40.dp),
-                                                                    color = MaterialTheme.colorScheme.primary
-                                                                )
-                                                                IconButton (
-                                                                    onClick = {
-                                                                        scope.launch {
-                                                                            viewModel.cancelFileDownload(content.document.document)
-                                                                            isDownloading = false
-                                                                        }
-                                                                    }
-                                                                ) {
-                                                                    Icon(
-                                                                        painterResource(R.drawable.baseline_close_24),
-                                                                        "Отменить"
-                                                                    )
-                                                                }
-                                                            }
-
-                                                            isFileDownloaded -> {
-                                                                if (documentThumbnailPath != null) {
-                                                                    AsyncImage(
-                                                                        model = documentThumbnailPath,
-                                                                        contentDescription = "Документ",
-                                                                        modifier = Modifier
-                                                                            .size(80.dp)
-                                                                            .clip(
-                                                                                RoundedCornerShape(
-                                                                                    16.dp
-                                                                                )
-                                                                            )
-                                                                            .clickable { onDownloadClick() }, // Клик для повторной загрузки
-                                                                        contentScale = ContentScale.Crop
-                                                                    )
-                                                                } else {
-                                                                    Icon(
-                                                                        painter = painterResource(R.drawable.baseline_insert_drive_file_24),
-                                                                        contentDescription = "Документ",
-                                                                        modifier = Modifier.size(40.dp),
-                                                                        tint = MaterialTheme.colorScheme.onSurface
-                                                                    )
-                                                                }
-                                                            }
-
-                                                            else -> {
-                                                                Icon(
-                                                                    painter = painterResource(R.drawable.ic_download),
-                                                                    contentDescription = "Скачать документ",
-                                                                    modifier = Modifier.size(40.dp),
-                                                                    tint = MaterialTheme.colorScheme.primary
-                                                                )
-                                                            }
-                                                        }
-                                                    }
-
-                                                    Spacer(modifier = Modifier.width(16.dp))
-
-                                                    Column {
-                                                        Text(
-                                                            text = documentName,
-                                                            style = MaterialTheme.typography.bodyMedium,
-                                                            maxLines = 2,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                        Row {
-                                                            if (isDownloading) {
-                                                                Text(
-                                                                    text = formatFileSize(downloadedSize.toInt() ?: 0) + " / ",
-                                                                    style = MaterialTheme.typography.labelMedium
-                                                                )
-                                                            }
-                                                            if (uploadedSize != null) {
-                                                                Text(
-                                                                    text = uploadedSize!!,
-                                                                    style = MaterialTheme.typography.labelMedium
-                                                                )
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            is MessageSticker -> {
-                                                val sticker = content.sticker
-                                                val stickerFile = sticker?.sticker
-                                                var stickerPath by remember { mutableStateOf<String?>(null) }
-
-                                                LaunchedEffect (stickerFile) {
-                                                    if (stickerFile?.local?.isDownloadingCompleted == false) {
-                                                        viewModel.addFileToDownloads(stickerFile, chatId, messageId)
-                                                    } else {
-                                                        stickerPath = stickerFile?.local?.path
-                                                    }
-                                                }
-
-                                                LaunchedEffect(downloadedFiles.values) {
-                                                    val downloadedFile = downloadedFiles[stickerFile?.id]
-                                                    if (downloadedFile?.local?.isDownloadingCompleted == true) {
-                                                        stickerPath = downloadedFile.local?.path
-                                                    }
-                                                }
-
-                                                if (stickerPath != null) {
-                                                    when(sticker.format) {
-                                                        is TdApi.StickerFormatWebp -> {
-                                                            AsyncImage(
-                                                                model = stickerPath,
-                                                                contentDescription = "Стикер",
-                                                                contentScale = ContentScale.Fit,
-                                                                modifier = Modifier
-                                                                    .size(200.dp)
-                                                                    .clip(RoundedCornerShape(24.dp))
-                                                            )
-                                                        }
-                                                        is TdApi.StickerFormatWebm -> {
-                                                            AndroidView(
-                                                                factory = { context ->
-                                                                    PlayerView(context).apply {
-                                                                        val player = ExoPlayer.Builder(context).build()
-                                                                        this.player = player
-                                                                        val mediaItem = MediaItem.fromUri(stickerPath!!)
-                                                                        player.setMediaItem(mediaItem)
-                                                                        player.repeatMode = Player.REPEAT_MODE_ALL
-                                                                        player.prepare()
-                                                                        player.play()
-                                                                        this.useController = false
-                                                                    }
-                                                                },
-                                                                modifier = Modifier
-                                                                    .size(200.dp)
-                                                                    .clip(RoundedCornerShape(24.dp))
-                                                            )
-                                                        }
-                                                        is TdApi.StickerFormatTgs -> {
-                                                            val tgsJson = viewModel.decompressTgs(stickerPath!!)
-                                                            val composition by rememberLottieComposition(LottieCompositionSpec.JsonString(tgsJson))
-                                                            val progress by animateLottieCompositionAsState(composition)
-
-                                                            LottieAnimation(
-                                                                composition = composition,
-                                                                iterations = Int.MAX_VALUE,
-                                                                modifier = Modifier
-                                                                    .size(200.dp)
-                                                                    .clip(RoundedCornerShape(24.dp))
-                                                            )
-                                                        }
-                                                    }
-                                                } else {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(200.dp)
-                                                            .clip(RoundedCornerShape(24.dp))
-                                                            .background(MaterialTheme.colorScheme.surfaceContainerLow),
-                                                    ) {
-                                                        CircularProgressIndicator(
-                                                            modifier = Modifier
-                                                                .size(40.dp)
-                                                                .align(Alignment.Center),
-                                                            color = MaterialTheme.colorScheme.primary
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                            is MessageVoiceNote -> {
-                                                var isListened by remember { mutableStateOf(false) }
-
-                                                LaunchedEffect(isVoicePlaying) {
-                                                    isListened = content.isListened
-                                                }
-                                                Row(
-                                                    modifier = Modifier.padding(16.dp),
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                                ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(36.dp)
-                                                            .clip(CircleShape)
-                                                            .background(MaterialTheme.colorScheme.primary)
-                                                            .clickable { onTogglePlay(messageId, content, chatId) },
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Icon(
-                                                            painter = painterResource(
-                                                                id = if (idMessageOfVoiceNote == messageId && isVoicePlaying)
-                                                                    R.drawable.baseline_pause_24
-                                                                else
-                                                                    R.drawable.baseline_play_arrow_24
-                                                            ),
-                                                            contentDescription = "Play/Pause",
-                                                            tint = MaterialTheme.colorScheme.onPrimary
-                                                        )
-                                                    }
-
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(36.dp)
-                                                            .clip(CircleShape)
-                                                            .background(MaterialTheme.colorScheme.surface),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        AnimatedVoiceIndicator(isPlaying = idMessageOfVoiceNote == messageId && isVoicePlaying)
-                                                    }
-
-                                                    val seconds = content.voiceNote.duration
-                                                    Text(
-                                                        text = formatDuration(seconds),
-                                                        style = MaterialTheme.typography.bodyMedium
-                                                    )
-
-                                                    // Используем состояние из актуального сообщения
-                                                    if (!isListened) {
-                                                        Box(
-                                                            Modifier
-                                                                .size(8.dp)
-                                                                .clip(CircleShape)
-                                                                .background(MaterialTheme.colorScheme.primary)
-                                                        )
-                                                    }
-                                                }
-
-                                            }
-                                            else -> {
-                                                Text(
-                                                    modifier = Modifier.padding(16.dp),
-                                                    text = stringResource(R.string.unsupportedMessage),
-                                                    style = MaterialTheme.typography.bodyMedium
-                                                )
-                                            }
-                                        }
+                                        MessageItem(
+                                            onMediaClick = { id ->
+                                                selectedMessageId = id
+                                            },
+                                            viewModel = viewModel,
+                                            idMessageOfVoiceNote = idMessageOfVoiceNote,
+                                            messageId = messageId,
+                                            isVoicePlaying = isVoicePlaying,
+                                            chatId = chatId,
+                                            onTogglePlay = { messageId, content, chatId ->
+                                                onTogglePlay(messageId, content, chatId)
+                                            },
+                                            item = item
+                                        )
                                     }
                                 }
                             }
@@ -1250,8 +806,12 @@ fun RepliedMessage(replyTo: TdApi.MessageReplyTo, viewModel: MainViewModel, onCl
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.width(4.dp))
-            Box(modifier = Modifier.clip(
-                CircleShape).background(MaterialTheme.colorScheme.onSurface).size(4.dp))
+            Box(modifier = Modifier
+                .clip(
+                    CircleShape
+                )
+                .background(MaterialTheme.colorScheme.onSurface)
+                .size(4.dp))
             Spacer(modifier = Modifier.width(4.dp))
         } else {
             Text(
@@ -1263,8 +823,12 @@ fun RepliedMessage(replyTo: TdApi.MessageReplyTo, viewModel: MainViewModel, onCl
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.width(4.dp))
-            Box(modifier = Modifier.clip(
-                CircleShape).background(MaterialTheme.colorScheme.onSurface).size(4.dp))
+            Box(modifier = Modifier
+                .clip(
+                    CircleShape
+                )
+                .background(MaterialTheme.colorScheme.onSurface)
+                .size(4.dp))
             Spacer(modifier = Modifier.width(4.dp))
         }
 
@@ -1822,7 +1386,10 @@ fun ChatBottomBar(
             .navigationBarsPadding()
     ) {
         Card(
-            modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(8.dp, 8.dp, 72.dp, 8.dp),
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(8.dp, 8.dp, 72.dp, 8.dp),
             shape = RoundedCornerShape(28.dp)
         ) {
             Row(
@@ -1884,10 +1451,14 @@ fun ChatBottomBar(
         }
 
         Box(
-            modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(8.dp)
         ) {
             VoiceRecordButton(
-                modifier = Modifier.wrapContentSize().align(Alignment.CenterEnd),
+                modifier = Modifier
+                    .wrapContentSize()
+                    .align(Alignment.CenterEnd),
                 currentMessageMode = currentMessageMode,
                 onModeChange = {
                     onModeChange()
@@ -2074,7 +1645,9 @@ fun VoiceRecordButton(
         }
 
         if (isRecording) {
-            Canvas(modifier = Modifier.align(Alignment.CenterEnd).size(56.dp)) {
+            Canvas(modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .size(56.dp)) {
                 val center = Offset(size.width / 2f, size.height / 2f)
                 animatedAmplitudes.forEachIndexed { index, animatable ->
                     drawCircle(
@@ -2116,7 +1689,11 @@ fun VoiceRecordButton(
                                     if (isRecording) {
                                         // Короткое нажатие во время записи - отправляем
                                         scope.launch(Dispatchers.IO) {
-                                            stopAndSendRecording(recorderState.value, outputFile, onSendVoiceNote)
+                                            stopAndSendRecording(
+                                                recorderState.value,
+                                                outputFile,
+                                                onSendVoiceNote
+                                            )
                                             onRecordingChange(false)
                                             recorderState.value = null
                                             outputFile = null
@@ -2157,7 +1734,10 @@ fun VoiceRecordButton(
                                                     scope.launch(Dispatchers.IO) {
                                                         recorderState.value?.let { recorder ->
                                                             outputFile?.let { filePath ->
-                                                                stopRecording(recorder, filePath) { path ->
+                                                                stopRecording(
+                                                                    recorder,
+                                                                    filePath
+                                                                ) { path ->
                                                                     File(path).delete()
                                                                 }
                                                             }
@@ -2168,7 +1748,11 @@ fun VoiceRecordButton(
                                                     }
                                                 } else {
                                                     scope.launch(Dispatchers.IO) {
-                                                        stopAndSendRecording(recorderState.value, outputFile, onSendVoiceNote)
+                                                        stopAndSendRecording(
+                                                            recorderState.value,
+                                                            outputFile,
+                                                            onSendVoiceNote
+                                                        )
                                                         onRecordingChange(false)
                                                         recorderState.value = null
                                                         outputFile = null
@@ -2179,7 +1763,8 @@ fun VoiceRecordButton(
                                         }
 
                                         if (position.positionChanged() && !isLocked) {
-                                            val change = position.position - position.previousPosition
+                                            val change =
+                                                position.position - position.previousPosition
                                             offsetX += change.x
                                             offsetY += change.y
                                             offsetX = offsetX.coerceIn(-200f, 0f)
@@ -2204,7 +1789,10 @@ fun VoiceRecordButton(
                                                 scope.launch(Dispatchers.IO) {
                                                     recorderState.value?.let { recorder ->
                                                         outputFile?.let { filePath ->
-                                                            stopRecording(recorder, filePath) { path ->
+                                                            stopRecording(
+                                                                recorder,
+                                                                filePath
+                                                            ) { path ->
                                                                 File(path).delete()
                                                             }
                                                         }
@@ -2236,7 +1824,11 @@ fun VoiceRecordButton(
 
                                             if (!lockedPosition.pressed) {
                                                 scope.launch(Dispatchers.IO) {
-                                                    stopAndSendRecording(recorderState.value, outputFile, onSendVoiceNote)
+                                                    stopAndSendRecording(
+                                                        recorderState.value,
+                                                        outputFile,
+                                                        onSendVoiceNote
+                                                    )
                                                     onRecordingChange(false)
                                                     recorderState.value = null
                                                     outputFile = null
@@ -2321,5 +1913,481 @@ private fun stopRecording(recorder: MediaRecorder, filePath: String, onStop: (St
     } catch (e: Exception) {
         Log.e("VoiceRecorder", "Stop recording failed", e)
         throw e
+    }
+}
+
+
+@Composable
+private fun MessageItem(
+    viewModel: MainViewModel,
+    idMessageOfVoiceNote: Long?,
+    messageId: Long,
+    isVoicePlaying: Boolean,
+    onMediaClick: (Long) -> Unit,
+    chatId: Long,
+    onTogglePlay: (Long, MessageVoiceNote, Long) -> Unit,
+    item: TdApi.Message
+) {
+    val downloadedFiles by viewModel.downloadedFiles.collectAsState()
+    val scope = rememberCoroutineScope()
+    when (val content = item.content) {
+        is MessageText -> {
+            val formattedText = content.text
+            Text(
+                modifier = Modifier.padding(16.dp),
+                text = getAnnotatedString(formattedText),
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        is MessageVideo -> {
+            val videoContent = content.video
+            val thumbnailFile = (videoContent as Video).thumbnail?.file
+            var thumbnailPath by remember { mutableStateOf<String?>(null) }
+            val caption = content.caption
+
+
+            LaunchedEffect(thumbnailFile) {
+                if (thumbnailFile?.local?.isDownloadingCompleted == false) {
+                    viewModel.downloadFile(thumbnailFile)
+                } else {
+                    thumbnailPath = thumbnailFile?.local?.path
+                }
+            }
+
+            LaunchedEffect(downloadedFiles.values) {
+                val downloadedFile = downloadedFiles[thumbnailFile?.id]
+                if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                    thumbnailPath = downloadedFile.local?.path
+                }
+            }
+
+
+            Column {
+
+                if (caption.text != "" && content.showCaptionAboveMedia) {
+                    Text(
+                        modifier = Modifier.padding(16.dp),
+                        text = getAnnotatedString(caption),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .width(320.dp)
+                        .height(320.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                ) {
+                    AsyncImage(
+                        model = thumbnailPath,
+                        contentDescription = "Видео превью",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    IconButton(
+                        onClick = {
+                            onMediaClick(item.id)
+                        },
+                        modifier = Modifier.align(Alignment.Center)
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.baseline_play_arrow_24),
+                            contentDescription = "Запустить видео",
+                            modifier = Modifier.size(64.dp),
+                            tint = Color.White
+                        )
+                    }
+                }
+
+                if (caption.text != "" && !content.showCaptionAboveMedia) {
+                    Text(
+                        modifier = Modifier.padding(16.dp),
+                        text = getAnnotatedString(caption),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+
+            }
+        }
+        is MessagePhoto -> {
+            val photoInChat = content.photo?.sizes?.lastOrNull()?.photo
+            var photoPath by remember { mutableStateOf<String?>("") }
+
+            LaunchedEffect(photoInChat) {
+                if (photoInChat?.local?.isDownloadingCompleted == false) {
+                    viewModel.downloadFile(photoInChat)
+                } else {
+                    photoPath = photoInChat?.local?.path
+                }
+            }
+
+            LaunchedEffect(downloadedFiles.values) {
+                val downloadedFile = downloadedFiles[photoInChat?.id]
+                if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                    photoPath = downloadedFile.local?.path
+                }
+            }
+
+            val caption = content.caption
+
+            Column {
+                if (caption.text != "" && content.showCaptionAboveMedia) {
+                    Text(
+                        modifier = Modifier.padding(16.dp),
+                        text = getAnnotatedString(caption),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                AsyncImage(
+                    model = photoPath,
+                    contentDescription = "Фото сообщения",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .width(320.dp)
+                        .heightIn(max = 320.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .clickable {
+                            onMediaClick(item.id)
+                        }
+                )
+                if (caption.text != "" && !content.showCaptionAboveMedia) {
+                    Text(
+                        modifier = Modifier.padding(16.dp),
+                        text = getAnnotatedString(caption),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
+        is MessageDocument -> {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                val document = content.document.document
+                val downloadedSize = downloadedFiles[document.id]?.local?.downloadedSize ?: 0L
+                val downloadProgress = downloadedSize.toFloat() / document.expectedSize.toFloat()
+                val documentThumbnail = content.document.thumbnail?.file
+                var documentThumbnailPath by remember { mutableStateOf(documentThumbnail?.local?.path) }
+                val documentName = content.document?.fileName.toString()
+                val uploadedSize by remember { mutableStateOf<String?>(formatFileSize(document?.expectedSize?.toInt() ?: 0)) }
+                var isDownloading by remember { mutableStateOf(false) }
+                var isFileDownloaded by remember { mutableStateOf(false) }
+
+                LaunchedEffect(documentThumbnail) {
+                    if(documentThumbnail?.local?.isDownloadingCompleted == false) {
+                        viewModel.addFileToDownloads(documentThumbnail, chatId, messageId)
+                    } else {
+                        documentThumbnailPath = documentThumbnail?.local?.path
+                    }
+                }
+
+                LaunchedEffect(document) {
+                    if(document.local.isDownloadingCompleted) {
+                        isFileDownloaded = true
+                    }
+                }
+
+                LaunchedEffect(downloadedFiles.values) {
+                    val downloadedFile = downloadedFiles[documentThumbnail?.id]
+                    if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                        documentThumbnailPath = downloadedFile.local.path
+                    }
+                }
+
+
+                LaunchedEffect(downloadedFiles.values) {
+                    val downloadedFile = downloadedFiles[document?.id]
+                    if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                        isFileDownloaded = true
+                        isDownloading = false
+                    }
+                }
+
+                val context = LocalContext.current
+
+                val onDownloadClick: () -> Unit = {
+                    scope.launch {
+                        if (!isFileDownloaded) {
+                            isDownloading = true
+                            viewModel.addFileToDownloads(document, chatId, messageId)
+                        } else {
+                            val mimeType = getMimeType(documentName)
+                            val filePath = document.local.path
+
+                            if (viewModel.isApkFile(filePath)) {
+                                val canInstall = context.packageManager.canRequestPackageInstalls()
+                                if (!canInstall) {
+                                    val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                                        data = Uri.parse("package:${context.packageName}")
+                                    }
+                                    context.startActivity(intent) // Открываем настройки для разрешения
+                                    return@launch
+                                }
+                                viewModel.installApk(context, filePath)
+                            } else {
+                                val fileUri = FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.provider",
+                                    File(filePath)
+                                )
+
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(fileUri, mimeType)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+
+                                try {
+                                    context.startActivity(intent)
+                                } catch (e: ActivityNotFoundException) {
+                                    Toast.makeText(context, "Нет приложения для открытия файла", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    }
+                }
+
+
+                // Отображение в зависимости от состояния файла
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .clickable { onDownloadClick() }, // Клик для загрузки
+                    contentAlignment = Alignment.Center
+                ) {
+                    when {
+                        isDownloading -> {
+                            CircularProgressIndicator(
+                                progress = { downloadProgress },
+                                modifier = Modifier.size(40.dp),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            IconButton (
+                                onClick = {
+                                    scope.launch {
+                                        viewModel.cancelFileDownload(content.document.document)
+                                        isDownloading = false
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    painterResource(R.drawable.baseline_close_24),
+                                    "Отменить"
+                                )
+                            }
+                        }
+
+                        isFileDownloaded -> {
+                            if (documentThumbnailPath != null) {
+                                AsyncImage(
+                                    model = documentThumbnailPath,
+                                    contentDescription = "Документ",
+                                    modifier = Modifier
+                                        .size(80.dp)
+                                        .clip(
+                                            RoundedCornerShape(
+                                                16.dp
+                                            )
+                                        )
+                                        .clickable { onDownloadClick() }, // Клик для повторной загрузки
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Icon(
+                                    painter = painterResource(R.drawable.baseline_insert_drive_file_24),
+                                    contentDescription = "Документ",
+                                    modifier = Modifier.size(40.dp),
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        else -> {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_download),
+                                contentDescription = "Скачать документ",
+                                modifier = Modifier.size(40.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column {
+                    Text(
+                        text = documentName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row {
+                        if (isDownloading) {
+                            Text(
+                                text = formatFileSize(downloadedSize.toInt() ?: 0) + " / ",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                        if (uploadedSize != null) {
+                            Text(
+                                text = uploadedSize!!,
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        is MessageSticker -> {
+            val sticker = content.sticker
+            val stickerFile = sticker?.sticker
+            var stickerPath by remember { mutableStateOf<String?>(null) }
+
+            LaunchedEffect (stickerFile) {
+                if (stickerFile?.local?.isDownloadingCompleted == false) {
+                    viewModel.addFileToDownloads(stickerFile, chatId, messageId)
+                } else {
+                    stickerPath = stickerFile?.local?.path
+                }
+            }
+
+            LaunchedEffect(downloadedFiles.values) {
+                val downloadedFile = downloadedFiles[stickerFile?.id]
+                if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                    stickerPath = downloadedFile.local?.path
+                }
+            }
+
+            if (stickerPath != null) {
+                when(sticker.format) {
+                    is TdApi.StickerFormatWebp -> {
+                        AsyncImage(
+                            model = stickerPath,
+                            contentDescription = "Стикер",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .size(200.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                        )
+                    }
+                    is TdApi.StickerFormatWebm -> {
+                        AndroidView(
+                            factory = { context ->
+                                PlayerView(context).apply {
+                                    val player = ExoPlayer.Builder(context).build()
+                                    this.player = player
+                                    val mediaItem = MediaItem.fromUri(stickerPath!!)
+                                    player.setMediaItem(mediaItem)
+                                    player.repeatMode = Player.REPEAT_MODE_ALL
+                                    player.prepare()
+                                    player.play()
+                                    this.useController = false
+                                }
+                            },
+                            modifier = Modifier
+                                .size(200.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                        )
+                    }
+                    is TdApi.StickerFormatTgs -> {
+                        val tgsJson = viewModel.decompressTgs(stickerPath!!)
+                        val composition by rememberLottieComposition(LottieCompositionSpec.JsonString(tgsJson))
+                        val progress by animateLottieCompositionAsState(composition)
+
+                        LottieAnimation(
+                            composition = composition,
+                            iterations = Int.MAX_VALUE,
+                            modifier = Modifier
+                                .size(200.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                        )
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(200.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .align(Alignment.Center),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+        is MessageVoiceNote -> {
+            var isListened by remember { mutableStateOf(false) }
+
+            LaunchedEffect(isVoicePlaying) {
+                isListened = content.isListened
+            }
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .clickable { onTogglePlay(messageId, content, chatId) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(
+                            id = if (idMessageOfVoiceNote == messageId && isVoicePlaying)
+                                R.drawable.baseline_pause_24
+                            else
+                                R.drawable.baseline_play_arrow_24
+                        ),
+                        contentDescription = "Play/Pause",
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surface),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AnimatedVoiceIndicator(isPlaying = idMessageOfVoiceNote == messageId && isVoicePlaying)
+                }
+
+                val seconds = content.voiceNote.duration
+                Text(
+                    text = formatDuration(seconds),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                // Используем состояние из актуального сообщения
+                if (!isListened) {
+                    Box(
+                        Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary)
+                    )
+                }
+            }
+
+        }
+        else -> {
+            Text(
+                modifier = Modifier.padding(16.dp),
+                text = stringResource(R.string.unsupportedMessage),
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
     }
 }
