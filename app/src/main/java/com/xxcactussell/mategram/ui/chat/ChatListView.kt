@@ -471,9 +471,12 @@ fun ChatListView(
                 ) {
                     ChatDetailPane(
                         chatId = chat.id,
-                        onBackClick = {
+                        onBackClick = { finalPosition ->
                             scope.launch {
                                 navigator.navigateBack()
+                                if (finalPosition > 0) {
+                                    viewModel.saveScrollPosition(chat.id, finalPosition)
+                                }
                                 api.closeChat(chat.id)
                             }
                             isChatOpened = false

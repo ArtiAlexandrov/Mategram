@@ -176,6 +176,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.drinkless.tdlib.TdApi.EndGroupCallRecording
 import org.drinkless.tdlib.TdApi.MessageDocument
+import org.drinkless.tdlib.TdApi.MessageOriginChannel
+import org.drinkless.tdlib.TdApi.MessageOriginChat
+import org.drinkless.tdlib.TdApi.MessageOriginUser
 import org.drinkless.tdlib.TdApi.MessageSticker
 import org.drinkless.tdlib.TdApi.MessageVoiceNote
 import org.drinkless.tdlib.TdApi.VoiceNote
@@ -187,17 +190,13 @@ import kotlin.math.roundToInt
 fun ChatDetailPane(
     chatId: Long,
     window: Window,
-    onBackClick: () -> Unit,
+    onBackClick: (Int) -> Unit,
     viewModel: MainViewModel = viewModel(),
     onShowInfo: () -> Unit,
     isVoicePlaying: Boolean,
     idMessageOfVoiceNote: Long?,
     onTogglePlay: (Long, MessageVoiceNote, Long) -> Unit
 ) {
-
-    BackHandler(enabled = true) {
-        onBackClick()
-    }
 
     // Загружаем объект чата асинхронно при изменении chatId.
     var chat: TdApi.Chat? by remember { mutableStateOf(null) }
@@ -226,6 +225,11 @@ fun ChatDetailPane(
     var currentMessageMode by remember { mutableStateOf("voice") }
     var lastMessageMode by remember { mutableStateOf("voice") }
     var isRecording by remember { mutableStateOf(false) }
+
+
+    BackHandler(enabled = true) {
+        onBackClick(listState.firstVisibleItemIndex)
+    }
 
     LaunchedEffect(photo) {
         if (photo?.local?.isDownloadingCompleted == false) {
@@ -346,6 +350,15 @@ fun ChatDetailPane(
             }
     }
 
+    LaunchedEffect(chatId) {
+        // First, try to restore saved position
+        viewModel.getScrollPosition(chatId).collect { savedPosition ->
+            if (savedPosition > 0) {
+                listState.animateScrollToItem(savedPosition)
+            }
+        }
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         topBar = {
@@ -391,7 +404,9 @@ fun ChatDetailPane(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBackClick) {
+                    IconButton(onClick =  {
+                        onBackClick(listState.firstVisibleItemIndex)
+                    }) {
                         Icon(painterResource(R.drawable.baseline_arrow_back_24), contentDescription = null)
                     }
                 }
@@ -449,6 +464,51 @@ fun ChatDetailPane(
                     var date by remember { mutableStateOf("") }
                     var dateToCompare by remember { mutableLongStateOf(0L) }
                     var nextDateToCompare by remember { mutableLongStateOf(0L) }
+                    var senderTitle by remember { mutableStateOf("") }
+                    var isForwarded by remember { mutableStateOf(false) }
+
+                    LaunchedEffect(messagesForChat[index]) {
+                        val message = messagesForChat[index]
+
+                        // Проверяем forwardInfo вместо сравнения senderId
+                        if (message.forwardInfo != null) {
+                            isForwarded = true
+                            when (val origin = message.forwardInfo!!.origin) {
+                                is TdApi.MessageOriginUser -> {
+                                    val user = api.getUser(origin.senderUserId)
+                                    senderTitle = "${user.firstName} ${user.lastName}".trim()
+                                }
+                                is TdApi.MessageOriginChat -> {
+                                    val chatForward = api.getChat(origin.senderChatId)
+                                    senderTitle = chatForward.title
+                                }
+                                is TdApi.MessageOriginChannel -> {
+                                    val chatForward = api.getChat(origin.chatId)
+                                    senderTitle = chatForward.title
+                                    if (origin.authorSignature.isNotEmpty()) {
+                                        senderTitle += " (${origin.authorSignature})"
+                                    }
+                                }
+                                else -> {
+                                    senderTitle = "Переслано"
+                                }
+                            }
+                        } else {
+                            isForwarded = false
+                            // Если сообщение не переслано, получаем имя отправителя как обычно
+                            when (val sender = message.senderId) {
+                                is TdApi.MessageSenderChat -> {
+                                    val chatForward = api.getChat(sender.chatId)
+                                    senderTitle = chatForward.title
+                                }
+                                is TdApi.MessageSenderUser -> {
+                                    val user = api.getUser(sender.userId)
+                                    senderTitle = "${user.firstName} ${user.lastName}".trim()
+                                }
+                            }
+                        }
+                    }
+
 
                     Spacer(modifier = Modifier.height(8.dp))
 
@@ -491,7 +551,8 @@ fun ChatDetailPane(
                                             .clip(RoundedCornerShape(24.dp))
                                             .clickable {
                                                 isDateShown = !isDateShown
-                                                date = convertUnixTimestampToDate(album.date.toLong())
+                                                date =
+                                                    convertUnixTimestampToDate(album.date.toLong())
                                             },
                                         shape = RoundedCornerShape(24.dp),
                                         colors = CardDefaults.cardColors(
@@ -501,6 +562,36 @@ fun ChatDetailPane(
                                                 MaterialTheme.colorScheme.surfaceVariant
                                         )
                                     ) {
+                                        if (isForwarded) {
+                                            Card(
+                                                modifier = Modifier
+                                                    .padding(8.dp)
+                                                    .height(32.dp),
+                                                shape = RoundedCornerShape(16.dp),
+                                                colors = CardDefaults.cardColors(
+                                                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                                                )
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        painter = painterResource(R.drawable.mdi__share_all),
+                                                        contentDescription = "Reply"
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = senderTitle,
+                                                        style = MaterialTheme.typography.labelMedium.copy(
+                                                            color = MaterialTheme.colorScheme.primary
+                                                        ),
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+                                        }
                                         if (album.replyTo != null) {
                                             Card(
                                                 modifier = Modifier
@@ -511,17 +602,21 @@ fun ChatDetailPane(
                                                             if (album.replyTo !is MessageReplyToMessage) return@launch
 
                                                             // Сначала ищем сообщение в текущем списке
-                                                            val indexReply = messagesForChat.indexOfFirst { it.id == album.replyTo.messageId }
+                                                            val indexReply =
+                                                                messagesForChat.indexOfFirst { it.id == album.replyTo.messageId }
                                                             if (indexReply != -1) {
                                                                 // Сообщение найдено, прокручиваем к нему
-                                                                listState.animateScrollToItem(indexReply)
+                                                                listState.animateScrollToItem(
+                                                                    indexReply
+                                                                )
                                                                 return@launch
                                                             }
 
                                                             // Если сообщение не найдено, начинаем загрузку
                                                             isLoadingMore = true
                                                             try {
-                                                                var lastMessageId = messagesForChat.lastOrNull()?.id
+                                                                var lastMessageId =
+                                                                    messagesForChat.lastOrNull()?.id
                                                                 while (lastMessageId != null && !isLoadingMore) {
                                                                     // Загружаем следующую порцию сообщений
                                                                     viewModel.getMessagesForChat(
@@ -530,16 +625,20 @@ fun ChatDetailPane(
                                                                     )
 
                                                                     // Проверяем, появилось ли нужное сообщение
-                                                                    val newIndex = messagesForChat.indexOfFirst { it.id == album.replyTo.messageId }
+                                                                    val newIndex =
+                                                                        messagesForChat.indexOfFirst { it.id == album.replyTo.messageId }
                                                                     if (newIndex != -1) {
                                                                         // Нашли сообщение, прокручиваем к нему
-                                                                        listState.animateScrollToItem(newIndex)
+                                                                        listState.animateScrollToItem(
+                                                                            newIndex
+                                                                        )
                                                                         break
                                                                     }
 
                                                                     // Если достигли конца и сообщение не найдено
                                                                     if (listState.isLastItemVisible()) {
-                                                                        lastMessageId = messagesForChat.lastOrNull()?.id
+                                                                        lastMessageId =
+                                                                            messagesForChat.lastOrNull()?.id
                                                                     } else {
                                                                         break
                                                                     }
@@ -616,6 +715,36 @@ fun ChatDetailPane(
                                             MaterialTheme.colorScheme.surfaceVariant
                                     )
                                 ) {
+                                    if (isForwarded) {
+                                        Card(
+                                            modifier = Modifier
+                                                .padding(8.dp)
+                                                .height(32.dp),
+                                            shape = RoundedCornerShape(16.dp),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainer
+                                            )
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    painter = painterResource(R.drawable.mdi__share_all),
+                                                    contentDescription = "Reply"
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = senderTitle,
+                                                    style = MaterialTheme.typography.labelMedium.copy(
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    ),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                    }
                                     if (message.replyTo is MessageReplyToMessage) {
                                         Card(
                                             modifier = Modifier
@@ -626,7 +755,8 @@ fun ChatDetailPane(
                                                         if (message.replyTo !is MessageReplyToMessage) return@launch
 
                                                         // Сначала ищем сообщение в текущем списке
-                                                        val indexReply = messagesForChat.indexOfFirst { it.id == (message.replyTo as MessageReplyToMessage).messageId }
+                                                        val indexReply =
+                                                            messagesForChat.indexOfFirst { it.id == (message.replyTo as MessageReplyToMessage).messageId }
                                                         if (indexReply != -1) {
                                                             // Сообщение найдено, прокручиваем к нему
                                                             listState.animateScrollToItem(indexReply)
@@ -636,7 +766,8 @@ fun ChatDetailPane(
                                                         // Если сообщение не найдено, начинаем загрузку
                                                         isLoadingMore = true
                                                         try {
-                                                            var lastMessageId = messagesForChat.lastOrNull()?.id
+                                                            var lastMessageId =
+                                                                messagesForChat.lastOrNull()?.id
                                                             while (lastMessageId != null && !isLoadingMore) {
                                                                 // Загружаем следующую порцию сообщений
                                                                 viewModel.getMessagesForChat(
@@ -645,16 +776,20 @@ fun ChatDetailPane(
                                                                 )
 
                                                                 // Проверяем, появилось ли нужное сообщение
-                                                                val newIndex = messagesForChat.indexOfFirst { it.id == (message.replyTo as MessageReplyToMessage).messageId }
+                                                                val newIndex =
+                                                                    messagesForChat.indexOfFirst { it.id == (message.replyTo as MessageReplyToMessage).messageId }
                                                                 if (newIndex != -1) {
                                                                     // Нашли сообщение, прокручиваем к нему
-                                                                    listState.animateScrollToItem(newIndex)
+                                                                    listState.animateScrollToItem(
+                                                                        newIndex
+                                                                    )
                                                                     break
                                                                 }
 
                                                                 // Если достигли конца и сообщение не найдено
                                                                 if (listState.isLastItemVisible()) {
-                                                                    lastMessageId = messagesForChat.lastOrNull()?.id
+                                                                    lastMessageId =
+                                                                        messagesForChat.lastOrNull()?.id
                                                                 } else {
                                                                     break
                                                                 }

@@ -18,7 +18,9 @@ import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
+import androidx.datastore.dataStoreFile
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.application
 import androidx.lifecycle.viewModelScope
 import com.xxcactussell.mategram.domain.entity.AuthState
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramCredentials
@@ -71,7 +73,15 @@ import java.io.FileInputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.GZIPInputStream
-
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = TelegramRepository
@@ -698,6 +708,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setOnline(b: Boolean) {
         viewModelScope.launch {
             api.setOption("online", TdApi.OptionValueBoolean(b))
+        }
+    }
+
+    private val context = application
+    private val dataStore: DataStore<Preferences> by lazy {
+        PreferenceDataStoreFactory.create(
+            produceFile = { context.filesDir.resolve("chat_scroll_positions.preferences_pb") }
+        )
+    }
+
+    fun saveScrollPosition(chatId: Long, index: Int) {
+        viewModelScope.launch {
+            dataStore.edit { preferences ->
+                preferences[intPreferencesKey("scroll_position_$chatId")] = index
+            }
+        }
+    }
+
+    fun getScrollPosition(chatId: Long): Flow<Int> {
+        return dataStore.data.map { preferences ->
+            preferences[intPreferencesKey("scroll_position_$chatId")] ?: 0
         }
     }
 }
