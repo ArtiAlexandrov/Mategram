@@ -886,6 +886,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun updatePermissionsForMember(chat: TdApi.Chat, member: TdApi.ChatMember) {
         val permissions = when (member.status) {
+            is TdApi.ChatMemberStatusCreator -> {
+                ChatPermissions(
+                    canSendBasicMessages = true,
+                    canSendAudios = true,
+                    canSendDocuments = true,
+                    canSendPhotos = true,
+                    canSendVideos = true,
+                    canSendVideoNotes = true,
+                    canSendVoiceNotes = true,
+                    canSendPolls = true,
+                    canSendOtherMessages = true,
+                    canAddLinkPreviews = true,
+                    canChangeInfo =  true,
+                    canInviteUsers =  true,
+                    canPinMessages =  true,
+                    canCreateTopics = false // Basic groups don't support topics
+                )
+            }
             is TdApi.ChatMemberStatusAdministrator -> {
                 val adminRights = member.status as TdApi.ChatMemberStatusAdministrator
                 ChatPermissions(
@@ -958,6 +976,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     canCreateTopics = false // Channels don't support topics
                 )
             }
+            is TdApi.ChatMemberStatusCreator -> {
+                ChatPermissions(
+                    canSendBasicMessages = true,
+                    canSendAudios = true,
+                    canSendDocuments = true,
+                    canSendPhotos = true,
+                    canSendVideos = true,
+                    canSendVideoNotes = true,
+                    canSendVoiceNotes = true,
+                    canSendPolls = true,
+                    canSendOtherMessages = true,
+                    canAddLinkPreviews = true,
+                    canChangeInfo = true,
+                    canInviteUsers = true,
+                    canPinMessages = true,
+                    canCreateTopics = false // Channels don't support topics
+                )
+            }
             else -> ChatPermissions()
         }
         _chatPermissions.update { it + (chat.id to permissions) }
@@ -986,7 +1022,56 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     canCreateTopics = false
                 )
             }
-            // ... rest of the status checks similar to updateForumPermissions
+            is TdApi.ChatMemberStatusCreator -> {
+                ChatPermissions(
+                    canSendBasicMessages = true,
+                    canSendAudios = true,
+                    canSendDocuments = true,
+                    canSendPhotos = true,
+                    canSendVideos = true,
+                    canSendVideoNotes = true,
+                    canSendVoiceNotes = true,
+                    canSendPolls = true,
+                    canSendOtherMessages = true,
+                    canAddLinkPreviews = true,
+                    canChangeInfo = true,
+                    canInviteUsers = true,
+                    canPinMessages = true,
+                    canCreateTopics = false
+                )
+            }
+
+            is TdApi.ChatMemberStatusMember -> {
+                ChatPermissions(
+                    canSendBasicMessages = true,
+                    canSendAudios = true,
+                    canSendDocuments = true,
+                    canSendPhotos = true,
+                    canSendVideos = true,
+                    canSendVideoNotes = true,
+                    canSendVoiceNotes = true,
+                    canSendPolls = true,
+                    canSendOtherMessages = true,
+                    canAddLinkPreviews = true,
+                    canCreateTopics = false
+                )
+            }
+            is TdApi.ChatMemberStatusRestricted -> {
+                val restrictions = member.status as TdApi.ChatMemberStatusRestricted
+                ChatPermissions(
+                    canSendBasicMessages = restrictions.permissions.canSendBasicMessages,
+                    canSendAudios = restrictions.permissions.canSendAudios,
+                    canSendDocuments = restrictions.permissions.canSendDocuments,
+                    canSendPhotos = restrictions.permissions.canSendPhotos,
+                    canSendVideos = restrictions.permissions.canSendVideos,
+                    canSendVideoNotes = restrictions.permissions.canSendVideoNotes,
+                    canSendVoiceNotes = restrictions.permissions.canSendVoiceNotes,
+                    canSendPolls = restrictions.permissions.canSendPolls,
+                    canSendOtherMessages = restrictions.permissions.canSendOtherMessages,
+                    canAddLinkPreviews = restrictions.permissions.canAddLinkPreviews,
+                    canCreateTopics = restrictions.permissions.canCreateTopics
+                )
+            }
             else -> ChatPermissions()
         }
         _chatPermissions.update { it + (chat.id to permissions) }
