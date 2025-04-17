@@ -166,14 +166,39 @@ import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.animateLottieCompositionAsState
 import com.airbnb.lottie.compose.rememberLottieComposition
+import com.xxcactussell.mategram.formatCompactNumber
 import com.xxcactussell.mategram.getMimeType
 import com.xxcactussell.mategram.kotlinx.telegram.core.convertUnixTimestampToDate
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getBasicGroup
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getBasicGroupFullInfo
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatAdministrators
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getSupergroup
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import org.drinkless.tdlib.TdApi.BasicGroup
+import org.drinkless.tdlib.TdApi.ChatActionCancel
+import org.drinkless.tdlib.TdApi.ChatActionChoosingContact
+import org.drinkless.tdlib.TdApi.ChatActionChoosingLocation
+import org.drinkless.tdlib.TdApi.ChatActionChoosingSticker
+import org.drinkless.tdlib.TdApi.ChatActionRecordingVideo
+import org.drinkless.tdlib.TdApi.ChatActionRecordingVideoNote
+import org.drinkless.tdlib.TdApi.ChatActionRecordingVoiceNote
+import org.drinkless.tdlib.TdApi.ChatActionStartPlayingGame
+import org.drinkless.tdlib.TdApi.ChatActionTyping
+import org.drinkless.tdlib.TdApi.ChatActionUploadingDocument
+import org.drinkless.tdlib.TdApi.ChatActionUploadingPhoto
+import org.drinkless.tdlib.TdApi.ChatActionUploadingVideo
+import org.drinkless.tdlib.TdApi.ChatActionUploadingVideoNote
+import org.drinkless.tdlib.TdApi.ChatActionUploadingVoiceNote
+import org.drinkless.tdlib.TdApi.ChatActionWatchingAnimations
+import org.drinkless.tdlib.TdApi.ChatTypeBasicGroup
+import org.drinkless.tdlib.TdApi.ChatTypePrivate
+import org.drinkless.tdlib.TdApi.ChatTypeSupergroup
 import org.drinkless.tdlib.TdApi.EndGroupCallRecording
 import org.drinkless.tdlib.TdApi.MessageDocument
 import org.drinkless.tdlib.TdApi.MessageOriginChannel
@@ -181,14 +206,28 @@ import org.drinkless.tdlib.TdApi.MessageOriginChat
 import org.drinkless.tdlib.TdApi.MessageOriginUser
 import org.drinkless.tdlib.TdApi.MessageSticker
 import org.drinkless.tdlib.TdApi.MessageVoiceNote
+import org.drinkless.tdlib.TdApi.Supergroup
+import org.drinkless.tdlib.TdApi.User
+import org.drinkless.tdlib.TdApi.UserStatusLastMonth
+import org.drinkless.tdlib.TdApi.UserStatusLastWeek
+import org.drinkless.tdlib.TdApi.UserStatusOffline
+import org.drinkless.tdlib.TdApi.UserStatusOnline
+import org.drinkless.tdlib.TdApi.UserStatusRecently
+import org.drinkless.tdlib.TdApi.UserType
+import org.drinkless.tdlib.TdApi.UserTypeBot
 import org.drinkless.tdlib.TdApi.VoiceNote
 import java.io.File
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class)
+private data class AlbumState(
+    val messages: MutableList<TdApi.Message> = mutableListOf(),
+    var currentAlbumId: Long = 0L
+)
+
 @Composable
 fun ChatDetailPane(
     chatId: Long,
+    chat: TdApi.Chat,
     window: Window,
     onBackClick: (Int) -> Unit,
     viewModel: MainViewModel = viewModel(),
@@ -199,9 +238,7 @@ fun ChatDetailPane(
 ) {
 
     // Загружаем объект чата асинхронно при изменении chatId.
-    var chat: TdApi.Chat? by remember { mutableStateOf(null) }
     LaunchedEffect(chatId) {
-        chat = api.getChat(chatId)
         viewModel.getMessagesForChat(chatId)
     }
     var textNewMessage by remember { mutableStateOf("") }
@@ -223,9 +260,15 @@ fun ChatDetailPane(
     var senderNameForReply by remember { mutableStateOf<String?>(null) }
     var selectedMessageId by remember { mutableStateOf<Long?>(null) }
     var currentMessageMode by remember { mutableStateOf("voice") }
-    var lastMessageMode by remember { mutableStateOf("voice") }
+    val lastMessageMode by remember { mutableStateOf("voice") }
     var isRecording by remember { mutableStateOf(false) }
 
+    val chatPermissions by viewModel.chatPermissions.collectAsState()
+    LaunchedEffect(chatId) {
+        viewModel.updateChatPermissions(chat)
+    }
+
+    val isCanWrite = chatPermissions[chatId]?.canSendBasicMessages == true
 
     BackHandler(enabled = true) {
         onBackClick(listState.firstVisibleItemIndex)
@@ -233,7 +276,7 @@ fun ChatDetailPane(
 
     LaunchedEffect(photo) {
         if (photo?.local?.isDownloadingCompleted == false) {
-            viewModel.downloadFile(chat?.photo?.small)
+            viewModel.downloadFile(chat.photo?.small)
         } else {
             avatarPath = photo?.local?.path
         }
@@ -350,100 +393,52 @@ fun ChatDetailPane(
             }
     }
 
-    LaunchedEffect(chatId) {
-        // First, try to restore saved position
-        viewModel.getScrollPosition(chatId).collect { savedPosition ->
-            if (savedPosition > 0) {
-                listState.animateScrollToItem(savedPosition)
-            }
-        }
-    }
-
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
-                ),
-                title = {
-                    Row(
-                        modifier = Modifier.clickable {
-                            onShowInfo()
-                        }
-                    )  {
-                        if (avatarPath != null) {
-                            AsyncImage(
-                                model = avatarPath,
-                                contentDescription = "Аватарка чата",
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                            )
-                        }  else {
-                            Box(modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary)) {
-                                Text(
-                                    text = chat?.title?.firstOrNull()?.toString() ?: "Ч",
-                                    modifier = Modifier.align(Alignment.Center),
-                                    style = MaterialTheme.typography.titleLarge,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.size(8.dp))
-                        Text(
-                            text = chat?.title ?: "Безымянный чат",
-                            modifier = Modifier.align(Alignment.CenterVertically),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick =  {
-                        onBackClick(listState.firstVisibleItemIndex)
-                    }) {
-                        Icon(painterResource(R.drawable.baseline_arrow_back_24), contentDescription = null)
-                    }
-                }
+            ChatTopBar(
+                chat = chat,
+                avatarPath = avatarPath,
+                onShowInfo = { onShowInfo() },
+                onBackClick = { index -> onBackClick(index) },
+                listState = listState,
+                viewModel = viewModel
             )
         },
         bottomBar = {
-            ChatBottomBar(
-                chatId = chatId,
-                textNewMessage = textNewMessage,
-                onTextChange = { textNewMessage = it },
-                currentMessageMode = currentMessageMode,
-                lastMessageMode = lastMessageMode,
-                onCurrentModeChange = { currentMessageMode = it },
-                isRecording = isRecording,
-                onRecordingChange = { isRecording = it },
-                inputMessageToReply = inputMessageToReply,
-                onReplyChange = { inputMessageToReply = it },
-                viewModel = viewModel,
-                onModeChange = {
-                    if (currentMessageMode == "text") {
-                        if (textNewMessage.isNotEmpty()) {
-                            viewModel.sendMessage(
-                                chatId = chatId,
-                                text = textNewMessage,
-                                replyToMessageId = inputMessageToReply,
-                            )
-                            textNewMessage = ""
-                            inputMessageToReply = null
-                            currentMessageMode = lastMessageMode
+            if (isCanWrite) {
+                ChatBottomBar(
+                    chatId = chatId,
+                    textNewMessage = textNewMessage,
+                    onTextChange = { textNewMessage = it },
+                    currentMessageMode = currentMessageMode,
+                    lastMessageMode = lastMessageMode,
+                    onCurrentModeChange = { currentMessageMode = it },
+                    isRecording = isRecording,
+                    onRecordingChange = { isRecording = it },
+                    inputMessageToReply = inputMessageToReply,
+                    onReplyChange = { inputMessageToReply = it },
+                    viewModel = viewModel,
+                    onModeChange = {
+                        if (currentMessageMode == "text") {
+                            if (textNewMessage.isNotEmpty()) {
+                                viewModel.sendMessage(
+                                    chatId = chatId,
+                                    text = textNewMessage,
+                                    replyToMessageId = inputMessageToReply,
+                                )
+                                textNewMessage = ""
+                                inputMessageToReply = null
+                                currentMessageMode = lastMessageMode
+                            }
+                        } else if (currentMessageMode == "voice") {
+                            currentMessageMode = "video"
+                        } else if (currentMessageMode == "video") {
+                            currentMessageMode = "voice"
                         }
-                    } else if (currentMessageMode == "voice") {
-                        currentMessageMode = "video"
-                    } else if (currentMessageMode == "video") {
-                        currentMessageMode = "voice"
                     }
-                }
-            )
+                )
+            }
         }
     ) { innerPadding ->
         // Основной контент экрана чата.
@@ -451,13 +446,13 @@ fun ChatDetailPane(
             .fillMaxSize()
             .padding(innerPadding))
         {
+            val albumState = remember { AlbumState() }
+
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
                 reverseLayout = true
             ) {
-
-                val currentAlbumMessages = mutableListOf<TdApi.Message>()
 
                 items(messagesForChat.size) { index ->
                     var isDateShown by remember { mutableStateOf(false) }
@@ -474,15 +469,15 @@ fun ChatDetailPane(
                         if (message.forwardInfo != null) {
                             isForwarded = true
                             when (val origin = message.forwardInfo!!.origin) {
-                                is TdApi.MessageOriginUser -> {
+                                is MessageOriginUser -> {
                                     val user = api.getUser(origin.senderUserId)
                                     senderTitle = "${user.firstName} ${user.lastName}".trim()
                                 }
-                                is TdApi.MessageOriginChat -> {
+                                is MessageOriginChat -> {
                                     val chatForward = api.getChat(origin.senderChatId)
                                     senderTitle = chatForward.title
                                 }
-                                is TdApi.MessageOriginChannel -> {
+                                is MessageOriginChannel -> {
                                     val chatForward = api.getChat(origin.chatId)
                                     senderTitle = chatForward.title
                                     if (origin.authorSignature.isNotEmpty()) {
@@ -514,178 +509,86 @@ fun ChatDetailPane(
 
                     val message = messagesForChat[index]
                     val nextMessage = if (index + 1 < messagesForChat.size) messagesForChat[index + 1] else null
+                    val previousMessage = if (index > 0) messagesForChat[index - 1] else null
+
 
                     if (message.mediaAlbumId != 0L) {
-                        // Part of an album - collect messages
-                        if (currentAlbumMessages.isEmpty() || currentAlbumMessages[0].mediaAlbumId == message.mediaAlbumId) {
-                            currentAlbumMessages.add(message)
-                        }
-
-                        // Check if this is the last message in album
-                        if (nextMessage?.mediaAlbumId != message.mediaAlbumId) {
-                            // Display complete album
-                            val album = MediaAlbum(
-                                messages = currentAlbumMessages.toList(),
-                                isOutgoing = currentAlbumMessages[0].isOutgoing,
-                                replyTo = currentAlbumMessages.firstOrNull { it.replyTo != null }?.replyTo,
-                                date = currentAlbumMessages[0].date,
-                                id = currentAlbumMessages[0].id
-                            )
-
-                            DraggableBox(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp),
-                                onDragComplete = {
-                                    inputMessageToReply = TdApi.InputMessageReplyToMessage(album.id, null)
-                                    messageIdToReply = album.id
-                                }
-                            ) {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalAlignment = if (!album.isOutgoing) Alignment.Start else Alignment.End
-                                ) {
-                                    Card(
-                                        modifier = Modifier
-                                            .widthIn(max = 320.dp)
-                                            .clip(RoundedCornerShape(24.dp))
-                                            .clickable {
-                                                isDateShown = !isDateShown
-                                                date =
-                                                    convertUnixTimestampToDate(album.date.toLong())
-                                            },
-                                        shape = RoundedCornerShape(24.dp),
-                                        colors = CardDefaults.cardColors(
-                                            containerColor = if (!album.isOutgoing)
-                                                MaterialTheme.colorScheme.inversePrimary
-                                            else
-                                                MaterialTheme.colorScheme.surfaceVariant
-                                        )
-                                    ) {
-                                        if (isForwarded) {
-                                            Card(
-                                                modifier = Modifier
-                                                    .padding(8.dp)
-                                                    .height(32.dp),
-                                                shape = RoundedCornerShape(16.dp),
-                                                colors = CardDefaults.cardColors(
-                                                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                                                )
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Icon(
-                                                        painter = painterResource(R.drawable.mdi__share_all),
-                                                        contentDescription = "Reply"
-                                                    )
-                                                    Spacer(modifier = Modifier.width(4.dp))
-                                                    Text(
-                                                        text = senderTitle,
-                                                        style = MaterialTheme.typography.labelMedium.copy(
-                                                            color = MaterialTheme.colorScheme.primary
-                                                        ),
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        if (album.replyTo != null) {
-                                            Card(
-                                                modifier = Modifier
-                                                    .padding(8.dp)
-                                                    .height(32.dp)
-                                                    .clickable {
-                                                        scope.launch {
-                                                            if (album.replyTo !is MessageReplyToMessage) return@launch
-
-                                                            // Сначала ищем сообщение в текущем списке
-                                                            val indexReply =
-                                                                messagesForChat.indexOfFirst { it.id == album.replyTo.messageId }
-                                                            if (indexReply != -1) {
-                                                                // Сообщение найдено, прокручиваем к нему
-                                                                listState.animateScrollToItem(
-                                                                    indexReply
-                                                                )
-                                                                return@launch
-                                                            }
-
-                                                            // Если сообщение не найдено, начинаем загрузку
-                                                            isLoadingMore = true
-                                                            try {
-                                                                var lastMessageId =
-                                                                    messagesForChat.lastOrNull()?.id
-                                                                while (lastMessageId != null && !isLoadingMore) {
-                                                                    // Загружаем следующую порцию сообщений
-                                                                    viewModel.getMessagesForChat(
-                                                                        chatId = chatId,
-                                                                        fromMessage = lastMessageId
-                                                                    )
-
-                                                                    // Проверяем, появилось ли нужное сообщение
-                                                                    val newIndex =
-                                                                        messagesForChat.indexOfFirst { it.id == album.replyTo.messageId }
-                                                                    if (newIndex != -1) {
-                                                                        // Нашли сообщение, прокручиваем к нему
-                                                                        listState.animateScrollToItem(
-                                                                            newIndex
-                                                                        )
-                                                                        break
-                                                                    }
-
-                                                                    // Если достигли конца и сообщение не найдено
-                                                                    if (listState.isLastItemVisible()) {
-                                                                        lastMessageId =
-                                                                            messagesForChat.lastOrNull()?.id
-                                                                    } else {
-                                                                        break
-                                                                    }
-
-                                                                    delay(100) // Небольшая задержка между загрузками
-                                                                }
-                                                            } finally {
-                                                                isLoadingMore = false
-                                                            }
-                                                        }
-                                                    },
-                                                shape = RoundedCornerShape(16.dp),
-                                                colors = CardDefaults.cardColors(
-                                                    containerColor = MaterialTheme.colorScheme.surfaceContainer
-                                                )
-                                            ) {
-                                                RepliedMessage(
-                                                    replyTo = album.replyTo,
-                                                    viewModel = viewModel,
-                                                    onClick = { }
-                                                )
-                                            }
-                                        }
-                                        MediaCarousel(
-                                            album = album,
-                                            viewModel = viewModel,
-                                            onMediaClick = { message -> selectedMessageId = message.id },
-                                            downloadedFiles = downloadedFiles
-                                        )
-                                    }
-                                    if (isDateShown) {
-                                        Text(
-                                            modifier = Modifier.padding(16.dp),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            text = date
-                                        )
-                                    }
-                                }
+                        // Если это первое сообщение альбома или предыдущее сообщение из другого альбома
+                        if (previousMessage?.mediaAlbumId != message.mediaAlbumId) {
+                            // Собираем все сообщения альбома
+                            val albumMessages = mutableListOf<TdApi.Message>()
+                            var i = index
+                            while (i < messagesForChat.size && messagesForChat[i].mediaAlbumId == message.mediaAlbumId) {
+                                albumMessages.add(messagesForChat[i])
+                                i++
                             }
-                            currentAlbumMessages.clear()
+
+                            // Отображаем альбом только один раз - при первом сообщении альбома
+                            DisplayAlbum(
+                                messages = albumMessages,
+                                onReply = { messageId ->
+                                    inputMessageToReply = TdApi.InputMessageReplyToMessage(messageId, null)
+                                    messageIdToReply = messageId
+                                },
+                                onMediaClick = { selectedMessageId = it },
+                                isForwarded = isForwarded,
+                                senderTitle = senderTitle,
+                                onReplyClick = { messageId ->
+                                    scope.launch {
+                                        // Сначала ищем сообщение в текущем списке
+                                        val indexReply =
+                                            messagesForChat.indexOfFirst { it.id == messageId }
+                                        if (indexReply != -1) {
+                                            // Сообщение найдено, прокручиваем к нему
+                                            listState.animateScrollToItem(
+                                                indexReply
+                                            )
+                                            return@launch
+                                        }
+
+                                        // Если сообщение не найдено, начинаем загрузку
+                                        isLoadingMore = true
+                                        try {
+                                            var lastMessageId =
+                                                messagesForChat.lastOrNull()?.id
+                                            while (lastMessageId != null && !isLoadingMore) {
+                                                // Загружаем следующую порцию сообщений
+                                                viewModel.getMessagesForChat(
+                                                    chatId = chatId,
+                                                    fromMessage = lastMessageId!!
+                                                )
+
+                                                // Проверяем, появилось ли нужное сообщение
+                                                val newIndex =
+                                                    messagesForChat.indexOfFirst { it.id == messageId }
+                                                if (newIndex != -1) {
+                                                    // Нашли сообщение, прокручиваем к нему
+                                                    listState.animateScrollToItem(
+                                                        newIndex
+                                                    )
+                                                    break
+                                                }
+
+                                                // Если достигли конца и сообщение не найдено
+                                                if (listState.isLastItemVisible()) {
+                                                    lastMessageId =
+                                                        messagesForChat.lastOrNull()?.id
+                                                } else {
+                                                    break
+                                                }
+
+                                                delay(100) // Небольшая задержка между загрузками
+                                            }
+                                        } finally {
+                                            isLoadingMore = false
+                                        }
+                                    }
+                                },
+                                viewModel = viewModel,
+                                downloadedFiles = downloadedFiles
+                            )
                         }
                     } else {
-                        // Single message
-                        if (currentAlbumMessages.isNotEmpty()) {
-                            currentAlbumMessages.clear()
-                        }
-
                         DraggableBox(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1108,6 +1011,127 @@ fun RepliedMessage(replyTo: TdApi.MessageReplyTo, viewModel: MainViewModel, onCl
 }
 
 data class MediaAlbum(val messages: List<TdApi.Message>, val isOutgoing: Boolean, val replyTo: TdApi.MessageReplyTo?, val date: Int, val id: Long)
+
+@Composable
+private fun DisplayAlbum(
+    messages: List<TdApi.Message>,
+    onReply: (Long) -> Unit,
+    onMediaClick: (Long) -> Unit,
+    isForwarded: Boolean,
+    senderTitle: String,
+    onReplyClick: (Long) -> Unit,
+    viewModel: MainViewModel,
+    downloadedFiles: MutableMap<Int, TdApi.File?>
+) {
+    if (messages.isEmpty()) return
+
+    val album = MediaAlbum(
+        messages = messages,
+        isOutgoing = messages[0].isOutgoing,
+        replyTo = messages.firstOrNull { it.replyTo != null }?.replyTo,
+        date = messages[0].date,
+        id = messages[0].id
+    )
+
+    var isDateShown by remember { mutableStateOf(false) }
+    var date by remember { mutableStateOf("") }
+
+    // Your existing album display code here
+    DraggableBox(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        onDragComplete = { onReply(album.id) }
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = if (!album.isOutgoing) Alignment.Start else Alignment.End
+        ) {
+            Card(
+                modifier = Modifier
+                    .widthIn(max = 320.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .clickable {
+                        isDateShown = !isDateShown
+                        date = convertUnixTimestampToDate(album.date.toLong())
+                    },
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (!album.isOutgoing)
+                        MaterialTheme.colorScheme.inversePrimary
+                    else
+                        MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                if (isForwarded) {
+                    Card(
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .height(32.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.mdi__share_all),
+                                contentDescription = "Reply"
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = senderTitle,
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    color = MaterialTheme.colorScheme.primary
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+                if (album.replyTo != null) {
+                    Card(
+                        modifier = Modifier
+                            .padding(8.dp)
+                            .height(32.dp)
+                            .clickable {
+                                if (album.replyTo is MessageReplyToMessage) {
+                                    onReplyClick(album.replyTo.messageId)
+                                }
+                            },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        )
+                    ) {
+                        RepliedMessage(
+                            replyTo = album.replyTo,
+                            viewModel = viewModel,
+                            onClick = { }
+                        )
+                    }
+                }
+                MediaCarousel(
+                    album = album,
+                    viewModel = viewModel,
+                    onMediaClick = { message -> onMediaClick(message.id) },
+                    downloadedFiles = downloadedFiles
+                )
+            }
+            if (isDateShown) {
+                Text(
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    text = date
+                )
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -2566,3 +2590,163 @@ private fun MessageItem(
         }
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChatTopBar(
+    chat: TdApi.Chat?,
+    avatarPath: String?,
+    onShowInfo: () -> Unit,
+    onBackClick: (Int) -> Unit,
+    listState: LazyListState,
+    viewModel: MainViewModel
+) {
+    val userStatuses by viewModel.userStatuses.collectAsState()
+    var statusText by remember { mutableStateOf("") }
+
+    var user by remember { mutableStateOf<Any?>(null) }
+
+    LaunchedEffect(chat) {
+        user =
+            when (val type = chat?.type) {
+                is ChatTypePrivate -> api.getUser(type.userId)
+                is ChatTypeSupergroup -> api.getSupergroup(type.supergroupId)
+                is ChatTypeBasicGroup -> api.getBasicGroup(type.basicGroupId)
+                else -> null
+            }
+        when (chat?.type) {
+            is ChatTypePrivate -> {
+                viewModel.updateCurrentStatus((chat.type as ChatTypePrivate).userId)
+            }
+            is ChatTypeBasicGroup -> {
+                statusText = "${formatCompactNumber((user as BasicGroup).memberCount)} участников"
+            }
+            is ChatTypeSupergroup -> {
+                statusText = if ((chat.type as ChatTypeSupergroup).isChannel) {
+                    "${formatCompactNumber((user as Supergroup).memberCount)} подписчиков"
+                } else {
+                    "${formatCompactNumber((user as Supergroup).memberCount)} участников"
+                }
+            }
+        }
+    }
+    LaunchedEffect(userStatuses.values) {
+        if (chat != null && chat.type is ChatTypePrivate && user != null) {
+            when (userStatuses[chat.id]?.action) {
+                is ChatActionCancel, null -> {
+                    statusText = if ((user as User).type is UserTypeBot) {
+                        "${formatCompactNumber(((user as User).type as UserTypeBot).activeUserCount)} пользователей в месяц"
+                    } else {
+                        when (val status = userStatuses[chat.id]?.status) {
+                            is UserStatusOnline -> "Онлайн"
+                            is UserStatusOffline -> {
+                                viewModel.formatLastSeenTime(status.wasOnline)
+                            }
+
+                            is UserStatusLastWeek -> "Был(-а) на этой неделе..."
+                            is UserStatusLastMonth -> "Был(-а) в этом месяце..."
+                            else -> "Был(-а) недавно"
+                        }
+                    }
+                }
+                is ChatActionTyping -> { statusText = "Печатает..." }
+                is ChatActionRecordingVideo -> { statusText = "Записывает видео..." }
+                is ChatActionUploadingVideo -> { statusText = "Загружает видео..." }
+                is ChatActionRecordingVoiceNote -> { statusText = "Записывает аудиосообщение..." }
+                is ChatActionUploadingVoiceNote -> { statusText = "Загружает аудиосообщение..." }
+                is ChatActionUploadingPhoto -> { statusText = "Загружает фото..." }
+                is ChatActionUploadingDocument -> { statusText = "Загружает документ..." }
+                is ChatActionChoosingSticker -> { statusText = "Выбирает стикер..." }
+                is ChatActionChoosingLocation -> { statusText = "Выбирает локацию..." }
+                is ChatActionChoosingContact -> { statusText = "Выбирает контакт..." }
+                is ChatActionStartPlayingGame -> { statusText = "Играет в игру..." }
+                is ChatActionRecordingVideoNote -> { statusText = "Записывает видеосообщение..." }
+                is ChatActionUploadingVideoNote -> { statusText = "Загружает видеосообщение..." }
+                is ChatActionWatchingAnimations -> { statusText = "Смотрит анимацию..." }
+
+            }
+        }
+    }
+
+    TopAppBar(
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
+        ),
+        title = {
+            Column {
+                Row(
+                    modifier = Modifier.clickable { onShowInfo() }
+                ) {
+                    if (avatarPath != null) {
+                        AsyncImage(
+                            model = avatarPath,
+                            contentDescription = "Аватарка чата",
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                        ) {
+                            Text(
+                                text = chat?.title?.firstOrNull()?.toString() ?: "Ч",
+                                modifier = Modifier.align(Alignment.Center),
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Column {
+                        Text(
+                            text = chat?.title ?: "Безымянный чат",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        if (statusText.isNotEmpty()) {
+                            ChatStatusText(
+                                status = statusText,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        navigationIcon = {
+            IconButton(onClick = { onBackClick(listState.firstVisibleItemIndex) }) {
+                Icon(
+                    painterResource(R.drawable.baseline_arrow_back_24),
+                    contentDescription = null
+                )
+            }
+        }
+    )
+}
+
+@Composable
+private fun ChatStatusText(
+    status: String,
+    modifier: Modifier = Modifier
+) {
+    val isTyping = status.endsWith("...")
+
+    Text(
+        text = status,
+        maxLines = 1,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (isTyping) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
+    )
+}
+
+// Update the status display in ChatTopBar

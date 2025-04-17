@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.launch
 import com.xxcactussell.mategram.kotlinx.telegram.extensions.ChatKtx
 import com.xxcactussell.mategram.kotlinx.telegram.extensions.UserKtx
+import com.xxcactussell.mategram.kotlinx.telegram.flows.chatActionFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatAddedToListFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatDraftMessageFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatLastMessageFlow
@@ -33,6 +34,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.fileFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.userFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.userStatusFlow
 import org.drinkless.tdlib.TdApi
 import org.drinkless.tdlib.TdApi.Message
 import java.text.SimpleDateFormat
@@ -159,6 +162,9 @@ object TelegramRepository : UserKtx, ChatKtx {
         started = SharingStarted.WhileSubscribed(5000),
         replay = 5
     )
+
+    val userStatusUpdateFlow: Flow<TdApi.UpdateUserStatus> = api.userStatusFlow()
+    val userChatActionFlow: Flow<TdApi.UpdateChatAction> = api.chatActionFlow()
 }
 
 suspend fun isUserContact(userId: Long): Boolean {

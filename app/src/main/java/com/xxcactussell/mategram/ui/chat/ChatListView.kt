@@ -2,6 +2,7 @@ package com.xxcactussell.mategram.ui.chat
 
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.Window
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutLinearInEasing
@@ -15,6 +16,7 @@ import androidx.compose.animation.slideOut
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -115,15 +117,40 @@ import com.xxcactussell.mategram.kotlinx.telegram.core.converUnixTimeStampForCha
 import com.xxcactussell.mategram.kotlinx.telegram.core.isUserContact
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.closeChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.createPrivateChat
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getBasicGroup
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatFolder
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getSupergroup
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.openChat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
+import org.drinkless.tdlib.TdApi.ChatActionChoosingContact
+import org.drinkless.tdlib.TdApi.ChatActionChoosingLocation
+import org.drinkless.tdlib.TdApi.ChatActionChoosingSticker
+import org.drinkless.tdlib.TdApi.ChatActionRecordingVideo
+import org.drinkless.tdlib.TdApi.ChatActionRecordingVideoNote
+import org.drinkless.tdlib.TdApi.ChatActionRecordingVoiceNote
+import org.drinkless.tdlib.TdApi.ChatActionStartPlayingGame
+import org.drinkless.tdlib.TdApi.ChatActionTyping
+import org.drinkless.tdlib.TdApi.ChatActionUploadingDocument
+import org.drinkless.tdlib.TdApi.ChatActionUploadingPhoto
+import org.drinkless.tdlib.TdApi.ChatActionUploadingVideo
+import org.drinkless.tdlib.TdApi.ChatActionUploadingVideoNote
+import org.drinkless.tdlib.TdApi.ChatActionUploadingVoiceNote
+import org.drinkless.tdlib.TdApi.ChatActionWatchingAnimations
+import org.drinkless.tdlib.TdApi.ChatTypeBasicGroup
+import org.drinkless.tdlib.TdApi.ChatTypePrivate
+import org.drinkless.tdlib.TdApi.ChatTypeSupergroup
 import org.drinkless.tdlib.TdApi.MessageVoiceNote
+import org.drinkless.tdlib.TdApi.UserStatusLastMonth
+import org.drinkless.tdlib.TdApi.UserStatusLastWeek
+import org.drinkless.tdlib.TdApi.UserStatusOffline
+import org.drinkless.tdlib.TdApi.UserStatusOnline
+import org.drinkless.tdlib.TdApi.UserTypeBot
+import org.drinkless.tdlib.TdApi.UserTypeDeleted
 
 @OptIn(
     ExperimentalMaterial3AdaptiveApi::class,
@@ -136,6 +163,7 @@ fun ChatListView(
 ) {
     val me by viewModel.me.collectAsState()
     val downloadedFiles by viewModel.downloadedFiles.collectAsState()
+    val userStatuses by viewModel.userStatuses.collectAsState()
     var chatMe by remember { mutableStateOf<TdApi.Chat?>(null) }
     val photo = chatMe?.photo?.small
     var avatarMePath by remember { mutableStateOf(downloadedFiles[chatMe?.photo?.small?.id]?.local?.path) }
@@ -416,7 +444,9 @@ fun ChatListView(
                                                 )
                                                 isChatOpened = true
                                             }
-                                        }
+                                        },
+                                        downloadedFiles = downloadedFiles,
+                                        userStatuses = userStatuses
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                 }
@@ -438,7 +468,9 @@ fun ChatListView(
                                                 )
                                                 isChatOpened = true
                                             }
-                                        }
+                                        },
+                                        downloadedFiles = downloadedFiles,
+                                        userStatuses = userStatuses
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                 }
@@ -471,6 +503,7 @@ fun ChatListView(
                 ) {
                     ChatDetailPane(
                         chatId = chat.id,
+                        chat = chat,
                         onBackClick = { finalPosition ->
                             scope.launch {
                                 navigator.navigateBack()
@@ -583,7 +616,9 @@ private fun ChatItem(
     chat: TdApi.Chat,
     viewModel: MainViewModel,
     isSelected: Boolean,
-    onChatClick: (chatId: Long) -> Unit
+    onChatClick: (chatId: Long) -> Unit,
+    downloadedFiles:  MutableMap<Int, TdApi. File?>,
+    userStatuses: Map<Long, MainViewModel. ChatInfo>
 ) {
     // Существующий код ChatItem с добавлением выделения для выбранного чата
     val containerColorCard = when {
@@ -592,10 +627,54 @@ private fun ChatItem(
         else -> Color.Transparent
     }
     val scope = rememberCoroutineScope()
+    var user by remember { mutableStateOf<Any?>(null) }
+
+    LaunchedEffect(chat) {
+        user =
+            when (val type = chat.type) {
+                is ChatTypePrivate -> api.getUser(type.userId)
+                is ChatTypeSupergroup -> api.getSupergroup(type.supergroupId)
+                is ChatTypeBasicGroup -> api.getBasicGroup(type.basicGroupId)
+                else -> null
+            }
+    }
+
+    val title =
+        when(user) {
+            is TdApi.User -> {
+                if ((user as TdApi.User).type is UserTypeDeleted) {
+                    "Удаленный пользователь"
+                } else {
+                    chat.title
+                }
+            }
+            else -> chat.title
+        }
 
     val photo = chat.photo?.small
-    val downloadedFiles by viewModel.downloadedFiles.collectAsState()
     var avatarPath by remember { mutableStateOf(downloadedFiles[chat.photo?.small?.id]?.local?.path)}
+
+    var isOnline by remember { mutableStateOf(false) }
+    LaunchedEffect(chat) {
+        if (chat.type is TdApi.ChatTypePrivate) {
+            viewModel.updateCurrentStatus((chat.type as ChatTypePrivate).userId)
+        }
+    }
+
+    LaunchedEffect(userStatuses.values) {
+        if (user is TdApi.User) {
+            if ((user as TdApi.User).type !is UserTypeBot) {
+                isOnline = when (userStatuses[chat.id]?.status) {
+                    is UserStatusOnline -> {
+                        true
+                    }
+                    else -> {
+                        false
+                    }
+                }
+            }
+        }
+    }
 
     LaunchedEffect(photo) {
         if (photo?.local?.isDownloadingCompleted == false) {
@@ -628,32 +707,38 @@ private fun ChatItem(
         shape = RoundedCornerShape(24.dp)
     ) {
         Row(modifier = Modifier.padding(16.dp)) {
-            if (avatarPath != null) {
-                AsyncImage(
-                    model = avatarPath,
-                    contentDescription = "Аватарка чата",
-                    modifier = Modifier
+            Box(modifier = Modifier
+                .size(48.dp)) {
+                if (avatarPath != null) {
+                    AsyncImage(
+                        model = avatarPath,
+                        contentDescription = "Аватарка чата",
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                    )
+                } else {
+                    // Показываем placeholder или индикатор загрузки
+                    Box(modifier = Modifier
                         .size(48.dp)
                         .clip(CircleShape)
-                )
-            } else {
-                // Показываем placeholder или индикатор загрузки
-                Box(modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)) {
-                    Text(
-                        text = chat.title?.firstOrNull()?.toString() ?: "Ч",
-                        modifier = Modifier.align(Alignment.Center),
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
+                        .background(MaterialTheme.colorScheme.primary)) {
+                        Text(
+                            text = chat.title?.firstOrNull()?.toString() ?: "Ч",
+                            modifier = Modifier.align(Alignment.Center),
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                }
+                if(isOnline) {
+                    Box(modifier = Modifier.clip(CircleShape).size(16.dp).border(2.dp, MaterialTheme.colorScheme.background, CircleShape).background(MaterialTheme.colorScheme.primary).align(Alignment.BottomEnd))
                 }
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row {
-                    Text(text = chat.title ?: "Без названия", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(text = title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (chat.positions?.firstOrNull()?.isPinned == true) {
                         Spacer(modifier = Modifier.width(4.dp))
                         Card (

@@ -79,9 +79,13 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatAdministrators
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import org.drinkless.tdlib.TdApi.ChatTypeBasicGroup
+import org.drinkless.tdlib.TdApi.ChatTypeSupergroup
+import org.drinkless.tdlib.TdApi.User
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = TelegramRepository
@@ -315,8 +319,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     handleFileUpdate(update)
                 }
             }
+            launch {
+                repository.userStatusUpdateFlow.collect { update ->
+                    handleUserOnlineUpdate(update)
+                }
+            }
+            launch {
+                repository.userChatActionFlow.collect { update ->
+                    handleUserChatActionUpdate(update)
+                }
+            }
         }
     }
+
 
     private suspend fun handleChatPosition(update: TdApi.UpdateChatPosition) {
         val chatId = update.chatId
@@ -730,6 +745,269 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return dataStore.data.map { preferences ->
             preferences[intPreferencesKey("scroll_position_$chatId")] ?: 0
         }
+    }
+
+    private val _userStatuses = MutableStateFlow<Map<Long, ChatInfo>>(emptyMap())
+    val userStatuses: StateFlow<Map<Long, ChatInfo>> = _userStatuses.asStateFlow()
+
+    data class ChatInfo(
+        val status: TdApi.UserStatus = TdApi.UserStatusEmpty(),
+        val action: TdApi.ChatAction? = null
+    )
+
+
+    private fun handleUserOnlineUpdate(update: TdApi.UpdateUserStatus) {
+        Log.d("USERSTATUS", "$userStatuses")
+        _userStatuses.update { currentMap ->
+            val currentInfo = currentMap[update.userId] ?: ChatInfo()
+            currentMap + (update.userId to currentInfo.copy(status = update.status))
+        }
+    }
+
+    suspend fun updateCurrentStatus(userId: Long) {
+        val userUpdated = api.getUser(userId)
+        Log.d("USERSTATUS", "$userStatuses")
+        _userStatuses.update { currentMap ->
+            val currentInfo = currentMap[userId] ?: ChatInfo()
+            currentMap + (userUpdated.id to currentInfo.copy(status = userUpdated.status))
+        }
+    }
+
+    private fun handleUserChatActionUpdate(update: TdApi.UpdateChatAction) {
+        if (update.senderId is TdApi.MessageSenderUser) {
+            val userId = (update.senderId as TdApi.MessageSenderUser).userId
+            Log.d("USERSTATUS", "$userStatuses")
+            _userStatuses.update { currentMap ->
+                val currentInfo = currentMap[userId] ?: ChatInfo()
+                currentMap + (userId to currentInfo.copy(action = update.action))
+            }
+        }
+    }
+
+    fun formatLastSeenTime(timestamp: Int): String {
+        val now = System.currentTimeMillis() / 1000
+        val diff = now - timestamp
+        return when {
+            diff < 60 -> "был(а) только что"
+            diff < 3600 -> "был(а) ${diff / 60} мин. назад"
+            diff < 86400 -> "был(а) ${diff / 3600} ч. назад"
+            else -> "был(а) ${diff / 86400} дн. назад"
+        }
+    }
+
+    //USER PERMISSIONS
+
+    // In MainViewModel
+    data class ChatPermissions(
+        val canSendBasicMessages: Boolean = false,
+        val canSendAudios: Boolean = false,
+        val canSendDocuments: Boolean = false,
+        val canSendPhotos: Boolean = false,
+        val canSendVideos: Boolean = false,
+        val canSendVideoNotes: Boolean = false,
+        val canSendVoiceNotes: Boolean = false,
+        val canSendPolls: Boolean = false,
+        val canSendOtherMessages: Boolean = false,
+        val canAddLinkPreviews: Boolean = false,
+        val canChangeInfo: Boolean = false,
+        val canInviteUsers: Boolean = false,
+        val canPinMessages: Boolean = false,
+        val canCreateTopics: Boolean = false
+    )
+
+    private val _chatPermissions = MutableStateFlow<Map<Long, ChatPermissions>>(emptyMap())
+    val chatPermissions: StateFlow<Map<Long, ChatPermissions>> = _chatPermissions.asStateFlow()
+
+    fun updateChatPermissions(chat: TdApi.Chat) {
+        viewModelScope.launch {
+            try {
+                when (val type = chat.type) {
+                    is TdApi.ChatTypePrivate -> {
+                        api.client?.send(TdApi.GetUser(type.userId)) { result ->
+                            val user = result as TdApi.User
+                            // For private chats, we need to check if the user is blocked
+                            api.client?.send(TdApi.GetBlockedMessageSenders(TdApi.BlockListMain(), 0, 100)) { blocked ->
+                                val blockedList = (blocked as TdApi.MessageSenders).senders
+                                val isBlocked = blockedList.any { sender ->
+                                    (sender as? TdApi.MessageSenderUser)?.userId == user.id
+                                }
+
+                                val permissions = ChatPermissions(
+                                    canSendBasicMessages = !isBlocked && !chat.hasProtectedContent,
+                                    canSendAudios = !isBlocked && !chat.hasProtectedContent,
+                                    canSendDocuments = !isBlocked && !chat.hasProtectedContent,
+                                    canSendPhotos = !isBlocked && !chat.hasProtectedContent,
+                                    canSendVideos = !isBlocked && !chat.hasProtectedContent,
+                                    canSendVideoNotes = !isBlocked && !chat.hasProtectedContent,
+                                    canSendVoiceNotes = !isBlocked && !chat.hasProtectedContent,
+                                    canSendPolls = !isBlocked && !chat.hasProtectedContent && user.type !is TdApi.UserTypeBot,
+                                    canSendOtherMessages = !isBlocked && !chat.hasProtectedContent,
+                                    canAddLinkPreviews = !isBlocked && !chat.hasProtectedContent,
+                                    canChangeInfo = false,
+                                    canInviteUsers = false,
+                                    canPinMessages = false,
+                                    canCreateTopics = false
+                                )
+                                _chatPermissions.update { it + (chat.id to permissions) }
+                            }
+                        }
+                    }
+
+                    is TdApi.ChatTypeBasicGroup -> {
+                        api.client?.send(TdApi.GetBasicGroupFullInfo(type.basicGroupId)) { result ->
+                            val info = result as TdApi.BasicGroupFullInfo
+                            api.client?.send(TdApi.GetChatMember(chat.id, TdApi.MessageSenderUser(me.value?.id ?: 0L))) { memberResult ->
+                                val member = memberResult as TdApi.ChatMember
+                                updatePermissionsForMember(chat, member)
+                            }
+                        }
+                    }
+
+                    is TdApi.ChatTypeSupergroup -> {
+                        api.client?.send(TdApi.GetSupergroupFullInfo(type.supergroupId)) { result ->
+                            val info = result as TdApi.SupergroupFullInfo
+                            api.client?.send(TdApi.GetChatMember(chat.id, TdApi.MessageSenderUser(me.value?.id ?: 0L))) { memberResult ->
+                                val member = memberResult as TdApi.ChatMember
+                                if (type.isChannel) {
+                                    updateChannelPermissions(chat, member, info)
+                                } else {
+                                    updateSupergroupPermissions(chat, member, info)
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("Permissions", "Failed to update permissions for chat ${chat.id}", e)
+                _chatPermissions.update { it + (chat.id to ChatPermissions()) }
+            }
+        }
+    }
+
+    private fun updatePermissionsForMember(chat: TdApi.Chat, member: TdApi.ChatMember) {
+        val permissions = when (member.status) {
+            is TdApi.ChatMemberStatusAdministrator -> {
+                val adminRights = member.status as TdApi.ChatMemberStatusAdministrator
+                ChatPermissions(
+                    canSendBasicMessages = true,
+                    canSendAudios = true,
+                    canSendDocuments = true,
+                    canSendPhotos = true,
+                    canSendVideos = true,
+                    canSendVideoNotes = true,
+                    canSendVoiceNotes = true,
+                    canSendPolls = true,
+                    canSendOtherMessages = true,
+                    canAddLinkPreviews = true,
+                    canChangeInfo = adminRights.rights.canChangeInfo,
+                    canInviteUsers = adminRights.rights.canInviteUsers,
+                    canPinMessages = adminRights.rights.canPinMessages,
+                    canCreateTopics = false // Basic groups don't support topics
+                )
+            }
+            is TdApi.ChatMemberStatusMember -> ChatPermissions(
+                canSendBasicMessages = !chat.hasProtectedContent,
+                canSendAudios = !chat.hasProtectedContent,
+                canSendDocuments = !chat.hasProtectedContent,
+                canSendPhotos = !chat.hasProtectedContent,
+                canSendVideos = !chat.hasProtectedContent,
+                canSendVideoNotes = !chat.hasProtectedContent,
+                canSendVoiceNotes = !chat.hasProtectedContent,
+                canSendPolls = !chat.hasProtectedContent,
+                canSendOtherMessages = !chat.hasProtectedContent,
+                canAddLinkPreviews = !chat.hasProtectedContent
+            )
+            is TdApi.ChatMemberStatusRestricted -> {
+                val restrictions = member.status as TdApi.ChatMemberStatusRestricted
+                ChatPermissions(
+                    canSendBasicMessages = restrictions.permissions.canSendBasicMessages,
+                    canSendAudios = restrictions.permissions.canSendAudios,
+                    canSendDocuments = restrictions.permissions.canSendDocuments,
+                    canSendPhotos = restrictions.permissions.canSendPhotos,
+                    canSendVideos = restrictions.permissions.canSendVideos,
+                    canSendVideoNotes = restrictions.permissions.canSendVideoNotes,
+                    canSendVoiceNotes = restrictions.permissions.canSendVoiceNotes,
+                    canSendPolls = restrictions.permissions.canSendPolls,
+                    canSendOtherMessages = restrictions.permissions.canSendOtherMessages,
+                    canAddLinkPreviews = restrictions.permissions.canAddLinkPreviews
+                )
+            }
+            else -> ChatPermissions()
+        }
+        _chatPermissions.update { it + (chat.id to permissions) }
+    }
+
+    private fun updateChannelPermissions(chat: TdApi.Chat, member: TdApi.ChatMember, info: TdApi.SupergroupFullInfo) {
+        val permissions = when (member.status) {
+            is TdApi.ChatMemberStatusAdministrator -> {
+                val adminRights = member.status as TdApi.ChatMemberStatusAdministrator
+                ChatPermissions(
+                    canSendBasicMessages = adminRights.rights.canPostMessages,
+                    canSendAudios = adminRights.rights.canPostMessages,
+                    canSendDocuments = adminRights.rights.canPostMessages,
+                    canSendPhotos = adminRights.rights.canPostMessages,
+                    canSendVideos = adminRights.rights.canPostMessages,
+                    canSendVideoNotes = adminRights.rights.canPostMessages,
+                    canSendVoiceNotes = adminRights.rights.canPostMessages,
+                    canSendPolls = adminRights.rights.canPostMessages,
+                    canSendOtherMessages = adminRights.rights.canPostMessages,
+                    canAddLinkPreviews = adminRights.rights.canPostMessages,
+                    canChangeInfo = adminRights.rights.canChangeInfo,
+                    canInviteUsers = adminRights.rights.canInviteUsers,
+                    canPinMessages = adminRights.rights.canPinMessages,
+                    canCreateTopics = false // Channels don't support topics
+                )
+            }
+            else -> ChatPermissions()
+        }
+        _chatPermissions.update { it + (chat.id to permissions) }
+    }
+
+
+    private fun updateSupergroupPermissions(chat: TdApi.Chat, member: TdApi.ChatMember, info: TdApi.SupergroupFullInfo) {
+        // Similar to updateForumPermissions but without topic creation
+        val permissions = when (member.status) {
+            is TdApi.ChatMemberStatusAdministrator -> {
+                val adminRights = member.status as TdApi.ChatMemberStatusAdministrator
+                ChatPermissions(
+                    canSendBasicMessages = true,
+                    canSendAudios = true,
+                    canSendDocuments = true,
+                    canSendPhotos = true,
+                    canSendVideos = true,
+                    canSendVideoNotes = true,
+                    canSendVoiceNotes = true,
+                    canSendPolls = true,
+                    canSendOtherMessages = true,
+                    canAddLinkPreviews = true,
+                    canChangeInfo = adminRights.rights.canChangeInfo,
+                    canInviteUsers = adminRights.rights.canInviteUsers,
+                    canPinMessages = adminRights.rights.canPinMessages,
+                    canCreateTopics = false
+                )
+            }
+            // ... rest of the status checks similar to updateForumPermissions
+            else -> ChatPermissions()
+        }
+        _chatPermissions.update { it + (chat.id to permissions) }
+    }
+
+
+}
+
+fun formatCompactNumber(number: Int): String {
+    return when {
+        number >= 1_000_000 -> {
+            val millions = number / 1_000_000f
+            if (millions % 1 == 0f) "${millions.toInt()}M"
+            else "%.1fM".format(millions)
+        }
+        number >= 1000 -> {
+            val thousands = number / 1000f
+            if (thousands % 1 == 0f) "${thousands.toInt()}K"
+            else "%.1fK".format(thousands)
+        }
+        else -> number.toString()
     }
 }
 
