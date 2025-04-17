@@ -804,13 +804,13 @@ fun ChatDetailPane(
                                                 downloadedFiles = downloadedFiles
                                             )
                                         }
-                                    }
-                                    if (isDateShown) {
-                                        Text(
-                                            modifier = Modifier.padding(16.dp),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            text = date
-                                        )
+                                        if (isDateShown) {
+                                            Text(
+                                                modifier = Modifier.padding(16.dp),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                text = date
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1015,13 +1015,13 @@ fun ChatDetailPane(
                                             item = message
                                         )
                                     }
-                                }
-                                if (isDateShown) {
-                                    Text(
-                                        modifier = Modifier.padding(16.dp),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        text = date
-                                    )
+                                    if (isDateShown) {
+                                        Text(
+                                            modifier = Modifier.padding(16.dp),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            text = date
+                                        )
+                                    }
                                 }
                             }
                         }
