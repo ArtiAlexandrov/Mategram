@@ -208,14 +208,17 @@ fun ChatListView(
         }
     }
 
-    LaunchedEffect(chats) {
-        pinnedChats = chats.filter { chat ->
-            chat.positions?.firstOrNull()?.isPinned == true
-        }.map { it.id }
-        includedChats = chats.filter { chat ->
-            chat.positions?.firstOrNull()?.isPinned == false
-        }.map { it.id }
+    LaunchedEffect(chats, filterFolderChipValue) {
+        if (filterFolderChipValue == null) {
+            pinnedChats = chats.filter { chat ->
+                chat.positions?.firstOrNull()?.isPinned == true
+            }.map { it.id }
+            includedChats = chats.filter { chat ->
+                chat.positions?.firstOrNull()?.isPinned == false
+            }.map { it.id }
+        }
     }
+
     var showBottomSheet by remember { mutableStateOf(false) }
     val bottomSheetState = rememberModalBottomSheetState()
 
@@ -343,87 +346,77 @@ fun ChatListView(
                             LazyColumn {
                                 item {
                                     LazyRow(modifier = Modifier.padding(horizontal = 16.dp)) {
-                                        items(folders) { folderMain ->
-                                            println("РИСУЕМ $folderMain")
-                                            var folder by remember {
-                                                mutableStateOf<TdApi.ChatFolder?>(
-                                                    null
-                                                )
-                                            }
-                                            LaunchedEffect(folders) {
-                                                folder = api.getChatFolder(folderMain.chatFolderId)
-                                            }
-                                            if (folder != null) {
-                                                FilterChip(
-                                                    onClick = {
-                                                        if (filterFolderChipValue == folder) {
-                                                            filterFolderChipValue = null
-                                                            pinnedChats = chats.filter { chat ->
-                                                                chat.positions?.firstOrNull()?.isPinned == true
-                                                            }.map { it.id }
-                                                            includedChats = chats.filter { chat ->
-                                                                chat.positions?.firstOrNull()?.isPinned == false
-                                                            }.map { it.id }
-                                                        } else {
-                                                            filterFolderChipValue = folder
-                                                            pinnedChats =
-                                                                folder!!.pinnedChatIds.toList()
-                                                            includedChats =
-                                                                folder!!.includedChatIds.toMutableList()
+                                        items(folders) { folder ->
+                                            println("РИСУЕМ $folder")
+                                            FilterChip(
+                                                onClick = {
+                                                    if (filterFolderChipValue == folder) {
+                                                        filterFolderChipValue = null
+                                                        pinnedChats = chats.filter { chat ->
+                                                            chat.positions?.firstOrNull()?.isPinned == true
+                                                        }.map { it.id }
+                                                        includedChats = chats.filter { chat ->
+                                                            chat.positions?.firstOrNull()?.isPinned == false
+                                                        }.map { it.id }
+                                                    } else {
+                                                        filterFolderChipValue = folder
+                                                        pinnedChats =
+                                                            folder.pinnedChatIds.toList()
+                                                        includedChats =
+                                                            folder.includedChatIds.toMutableList()
 
-                                                            scope.launch(Dispatchers.IO) {
-                                                                val filteredChats =
-                                                                    chats.filter { chat ->
-                                                                        when {
-                                                                            folder!!.includeBots && chat.type is TdApi.ChatTypePrivate -> {
-                                                                                val userId =
-                                                                                    (chat.type as TdApi.ChatTypePrivate).userId
-                                                                                val user =
-                                                                                    api.getUser(
-                                                                                        userId
-                                                                                    )
-                                                                                user.type is TdApi.UserTypeBot
-                                                                            }
-
-                                                                            folder!!.includeGroups && (chat.type is TdApi.ChatTypeBasicGroup ||
-                                                                                    (chat.type is TdApi.ChatTypeSupergroup && !(chat.type as TdApi.ChatTypeSupergroup).isChannel)) -> true
-
-                                                                            folder!!.includeChannels && chat.type is TdApi.ChatTypeSupergroup &&
-                                                                                    (chat.type as TdApi.ChatTypeSupergroup).isChannel -> true
-
-                                                                            folder!!.includeContacts && chat.type is TdApi.ChatTypePrivate &&
-                                                                                    isUserContact((chat.type as TdApi.ChatTypePrivate).userId) -> true
-
-                                                                            folder!!.includeNonContacts && chat.type is TdApi.ChatTypePrivate &&
-                                                                                    !isUserContact((chat.type as TdApi.ChatTypePrivate).userId) -> true
-
-                                                                            else -> false
+                                                        scope.launch(Dispatchers.IO) {
+                                                            val filteredChats =
+                                                                chats.filter { chat ->
+                                                                    when {
+                                                                        folder.includeBots && chat.type is TdApi.ChatTypePrivate -> {
+                                                                            val userId =
+                                                                                (chat.type as TdApi.ChatTypePrivate).userId
+                                                                            val user =
+                                                                                api.getUser(
+                                                                                    userId
+                                                                                )
+                                                                            user.type is TdApi.UserTypeBot
                                                                         }
+
+                                                                        folder.includeGroups && (chat.type is TdApi.ChatTypeBasicGroup ||
+                                                                                (chat.type is TdApi.ChatTypeSupergroup && !(chat.type as TdApi.ChatTypeSupergroup).isChannel)) -> true
+
+                                                                        folder.includeChannels && chat.type is TdApi.ChatTypeSupergroup &&
+                                                                                (chat.type as TdApi.ChatTypeSupergroup).isChannel -> true
+
+                                                                        folder.includeContacts && chat.type is TdApi.ChatTypePrivate &&
+                                                                                isUserContact((chat.type as TdApi.ChatTypePrivate).userId) -> true
+
+                                                                        folder.includeNonContacts && chat.type is TdApi.ChatTypePrivate &&
+                                                                                !isUserContact((chat.type as TdApi.ChatTypePrivate).userId) -> true
+
+                                                                        else -> false
                                                                     }
-
-                                                                includedChats += filteredChats.map { it.id }
-
-                                                                if (folder!!.excludeRead) {
-                                                                    includedChats =
-                                                                        includedChats.filter { chatId ->
-                                                                            api.getChat(chatId).unreadCount > 0
-                                                                        }.toMutableList()
                                                                 }
 
-                                                                if (folder!!.excludeMuted) {
-                                                                    includedChats =
-                                                                        includedChats.filter { chatId ->
-                                                                            api.getChat(chatId).notificationSettings.muteFor == 0
-                                                                        }.toMutableList()
-                                                                }
+                                                            includedChats += filteredChats.map { it.id }
+
+                                                            if (folder.excludeRead) {
+                                                                includedChats =
+                                                                    includedChats.filter { chatId ->
+                                                                        api.getChat(chatId).unreadCount > 0
+                                                                    }.toMutableList()
+                                                            }
+
+                                                            if (folder.excludeMuted) {
+                                                                includedChats =
+                                                                    includedChats.filter { chatId ->
+                                                                        api.getChat(chatId).notificationSettings.muteFor == 0
+                                                                    }.toMutableList()
                                                             }
                                                         }
-                                                    },
-                                                    selected = filterFolderChipValue == folder,
-                                                    label = { Text(text = folder!!.name.text.text) }
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                            }
+                                                    }
+                                                },
+                                                selected = filterFolderChipValue == folder,
+                                                label = { Text(text = folder.name.text.text) }
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
                                         }
                                     }
                                 }

@@ -26,6 +26,7 @@ import com.xxcactussell.mategram.kotlinx.telegram.extensions.UserKtx
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatActionFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatAddedToListFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatDraftMessageFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.chatFoldersFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatLastMessageFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatPositionFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatReadInboxFlow
@@ -37,6 +38,7 @@ import com.xxcactussell.mategram.kotlinx.telegram.flows.fileFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.userFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.userStatusFlow
 import org.drinkless.tdlib.TdApi
+import org.drinkless.tdlib.TdApi.ChatListFolder
 import org.drinkless.tdlib.TdApi.Message
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -111,10 +113,6 @@ object TelegramRepository : UserKtx, ChatKtx {
         return api.getFile(fileId)
     }
 
-    suspend fun loadChatFolder(chatFolderId: Int): TdApi.ChatFolder {
-        return api.getChatFolder(chatFolderId)
-    }
-
     suspend fun getMessagesForChat(chatId: Long, fromMessage: Long): TdApi.Messages {
         val result: TdApi.Messages = api.getChatHistory(chatId, fromMessage, 0, 50, false)
         return result
@@ -158,6 +156,12 @@ object TelegramRepository : UserKtx, ChatKtx {
     )
 
     val fileUpdateFLow: Flow<TdApi.UpdateFile> = api.fileFlow().shareIn(
+        scope = chatUpdatesScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        replay = 5
+    )
+
+    val chatFoldersUpdateFlow: Flow<TdApi.UpdateChatFolders> = api.chatFoldersFlow().shareIn(
         scope = chatUpdatesScope,
         started = SharingStarted.WhileSubscribed(5000),
         replay = 5

@@ -1,6 +1,7 @@
 [versions]
 accompanistNavigationAnimation = "0.30.1"
 agp = "8.8.2"
+androidGifDrawable = "1.2.28"
 animation = "1.7.8"
 coilCompose = "2.6.0"
 coilGif = "2.2.2"
@@ -29,6 +30,7 @@ adaptiveNavigationAndroid = "1.1.0"
 
 [libraries]
 accompanist-navigation-animation = { module = "com.google.accompanist:accompanist-navigation-animation", version.ref = "accompanistNavigationAnimation" }
+android-gif-drawable = { module = "pl.droidsonroids.gif:android-gif-drawable", version.ref = "androidGifDrawable" }
 androidx-adaptive = { module = "androidx.compose.material3.adaptive:adaptive" }
 androidx-adaptive-layout = { module = "androidx.compose.material3.adaptive:adaptive-layout" }
 androidx-adaptive-navigation = { module = "androidx.compose.material3.adaptive:adaptive-navigation" }

@@ -80,9 +80,11 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatAdministrators
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatFolder
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import org.drinkless.tdlib.TdApi.ChatListFolder
 import org.drinkless.tdlib.TdApi.ChatTypeBasicGroup
 import org.drinkless.tdlib.TdApi.ChatTypeSupergroup
 import org.drinkless.tdlib.TdApi.User
@@ -91,6 +93,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = TelegramRepository
     private val _authState = MutableStateFlow<AuthState>(AuthState.Initial)
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
+    private val chatUpdatesScope = TelegramRepository.chatUpdatesScope
 
     fun getMyString(id: Int): String {
         return getApplication<Application>().getString(id)
@@ -226,6 +229,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         observeAuthorizationState()
+
+        chatUpdatesScope.launch {
+            repository.chatFoldersUpdateFlow.collect { update ->
+                handleChatFoldersUpdate(update)
+            }
+        }
     }
 
     private fun observeAuthorizationState() {
@@ -269,7 +278,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val visibleChats = _visibleChats.asStateFlow()
     private val chatMap = mutableMapOf<Long, Chat>()
 
-    private val chatUpdatesScope = TelegramRepository.chatUpdatesScope
 
     fun updateChatsFromNetworkForView(limit: Int = 15) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -332,7 +340,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-
     private suspend fun handleChatPosition(update: TdApi.UpdateChatPosition) {
         val chatId = update.chatId
         Log.d("ChatUpdater" , "$chatId")
@@ -391,8 +398,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
 
 
-    private var _chatFolders = MutableStateFlow<List<TdApi.ChatListFolder>>(emptyList())
-    var chatFolders: StateFlow<List<TdApi.ChatListFolder>> = _chatFolders
+    private var _chatFolders = MutableStateFlow<List<TdApi.ChatFolder>>(emptyList())
+    var chatFolders: StateFlow<List<TdApi.ChatFolder>> = _chatFolders
+
+    private fun handleChatFoldersUpdate(update: TdApi.UpdateChatFolders) {
+        chatUpdatesScope.launch {
+            val newList: MutableList<TdApi.ChatFolder> = mutableListOf()
+            update.chatFolders.forEach { chatFolderInfo ->
+                val chatFolder = api.getChatFolder(chatFolderInfo.id)
+                newList += chatFolder
+                Log.d("CHATFOLDER", "$chatFolder")
+            }
+            _chatFolders.value = newList
+            Log.d("CHATFOLDER", "$newList ${_chatFolders.value}")
+        }
+    }
 
     private fun handleChatUpdate(chat: Chat) {
         synchronized(chatMap) {

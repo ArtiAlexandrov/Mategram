@@ -162,6 +162,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.IntOffset
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.ui.AspectRatioFrameLayout
 import com.airbnb.lottie.compose.LottieAnimation
 import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.animateLottieCompositionAsState
@@ -200,6 +202,7 @@ import org.drinkless.tdlib.TdApi.ChatTypeBasicGroup
 import org.drinkless.tdlib.TdApi.ChatTypePrivate
 import org.drinkless.tdlib.TdApi.ChatTypeSupergroup
 import org.drinkless.tdlib.TdApi.EndGroupCallRecording
+import org.drinkless.tdlib.TdApi.MessageAnimation
 import org.drinkless.tdlib.TdApi.MessageDocument
 import org.drinkless.tdlib.TdApi.MessageOriginChannel
 import org.drinkless.tdlib.TdApi.MessageOriginChat
@@ -875,7 +878,8 @@ fun ChatDetailPane(
                                             .clip(RoundedCornerShape(24.dp))
                                             .clickable {
                                                 isDateShown = !isDateShown
-                                                date = convertUnixTimestampToDate(message.date.toLong())
+                                                date =
+                                                    convertUnixTimestampToDate(message.date.toLong())
                                             },
                                         shape = RoundedCornerShape(24.dp),
                                         colors = CardDefaults.cardColors(
@@ -947,7 +951,9 @@ fun ChatDetailPane(
                                                                 messagesForChat.indexOfFirst { it.id == (message.replyTo as MessageReplyToMessage).messageId }
                                                             if (indexReply != -1) {
                                                                 // Сообщение найдено, прокручиваем к нему
-                                                                listState.animateScrollToItem(indexReply)
+                                                                listState.animateScrollToItem(
+                                                                    indexReply
+                                                                )
                                                                 return@launch
                                                             }
 
@@ -2398,6 +2404,67 @@ private fun MessageItem(
 
             }
         }
+        is MessageAnimation -> {
+            val animationInChat = content.animation.animation
+            var animationPath by remember { mutableStateOf<String?>("") }
+
+            LaunchedEffect(animationInChat) {
+                if (animationInChat?.local?.isDownloadingCompleted == false) {
+                    viewModel.downloadFile(animationInChat)
+                } else {
+                    animationPath = animationInChat?.local?.path
+                }
+                Log.d("GIF_MSG", "${content.animation.mimeType}")
+            }
+
+            LaunchedEffect(downloadedFiles.values) {
+                val downloadedFile = downloadedFiles[animationInChat?.id]
+                if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                    animationPath = downloadedFile.local?.path
+                }
+                Log.d("GIF_MSG", "$animationPath")
+            }
+
+            val caption = content.caption
+
+            Column {
+                if (caption.text != "" && content.showCaptionAboveMedia) {
+                    Text(
+                        modifier = Modifier.padding(16.dp),
+                        text = getAnnotatedString(caption),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                if(content.animation.mimeType == "image/gif") {
+                    AsyncImage(
+                        model = animationPath,
+                        contentDescription = "Анимация в сообщении",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .width(320.dp)
+                            .heightIn(max = 320.dp)
+                            .clickable {
+                                onMediaClick(item.id)
+                            }
+                    )
+                } else {
+                    AnimationPlayer(
+                        animationPath = animationPath,
+                        modifier = Modifier
+                            .widthIn(max = 320.dp)
+                            .heightIn(max = 320.dp)
+                    )
+                }
+                if (caption.text != "" && !content.showCaptionAboveMedia) {
+                    Text(
+                        modifier = Modifier.padding(16.dp),
+                        text = getAnnotatedString(caption),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+
+        }
         is MessagePhoto -> {
             val photoInChat = content.photo?.sizes?.lastOrNull()?.photo
             var photoPath by remember { mutableStateOf<String?>("") }
@@ -2939,3 +3006,45 @@ private fun ChatStatusText(
 }
 
 fun TdApi.ChatType.isPrivate(): Boolean = this is TdApi.ChatTypePrivate
+
+
+@Composable
+fun AnimationPlayer(
+    animationPath: String?,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val player = remember { ExoPlayer.Builder(context).build() }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            player.release()
+        }
+    }
+
+    LaunchedEffect(animationPath) {
+        if (!animationPath.isNullOrEmpty()) {
+            try {
+                val uri = Uri.fromFile(File(animationPath))
+                player.apply {
+                    setMediaItem(MediaItem.fromUri(uri))
+                    repeatMode = Player.REPEAT_MODE_ALL
+                    playWhenReady = true
+                    prepare()
+                }
+            } catch (e: Exception) {
+                Log.e("AnimationPlayer", "Error loading animation: $e")
+            }
+        }
+    }
+
+    AndroidView(
+        factory = { ctx ->
+            PlayerView(ctx).apply {
+                this.player = player
+                useController = false
+            }
+        },
+        modifier = modifier
+    )
+}
