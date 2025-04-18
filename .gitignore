@@ -13,3 +13,5 @@
 .externalNativeBuild
 .cxx
 local.properties
+app/src/main/java/com/xxcactussell/mategram/kotlinx/telegram/core/TelegramCredentials.kt
+app/google-services.json
