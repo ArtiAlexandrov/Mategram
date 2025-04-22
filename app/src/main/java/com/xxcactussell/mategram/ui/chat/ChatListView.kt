@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -58,6 +59,8 @@ import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -725,6 +728,7 @@ private fun ChatItem(
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(shape)
             .padding(horizontal = 16.dp)
             .clickable {
                 scope.launch {
@@ -736,37 +740,12 @@ private fun ChatItem(
         ),
         shape = shape
     ) {
-        Row(modifier = Modifier.padding(16.dp)) {
-            Box(modifier = Modifier
-                .size(48.dp)) {
-                if (avatarPath != null) {
-                    AsyncImage(
-                        model = avatarPath,
-                        contentDescription = "Аватарка чата",
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                    )
-                } else {
-                    // Показываем placeholder или индикатор загрузки
-                    Box(modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary)) {
-                        Text(
-                            text = chat.title?.firstOrNull()?.toString() ?: "Ч",
-                            modifier = Modifier.align(Alignment.Center),
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                    }
-                }
-                if(isOnline) {
-                    Box(modifier = Modifier.clip(CircleShape).size(16.dp).border(2.dp, MaterialTheme.colorScheme.background, CircleShape).background(MaterialTheme.colorScheme.primary).align(Alignment.BottomEnd))
-                }
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
+
+        ListItem(
+            colors = ListItemDefaults.colors(
+                containerColor = Color.Transparent
+            ),
+            headlineContent = {
                 Row {
                     Text(text = title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (chat.positions?.firstOrNull()?.isPinned == true) {
@@ -790,6 +769,8 @@ private fun ChatItem(
                         }
                     }
                 }
+            },
+            supportingContent = {
                 Row (verticalAlignment = Alignment.CenterVertically) {
                     var messageContent by remember { mutableStateOf<MessageContent?>(null) }
                     LaunchedEffect(chat) {
@@ -825,25 +806,57 @@ private fun ChatItem(
                         )
                     }
                 }
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            chat.lastMessage?.date?.toLong()
-            Column (
-                horizontalAlignment = Alignment.End,
-            )
-            {
-                Text(converUnixTimeStampForChatList(chat.lastMessage?.date?.toLong() ?: 0L), style = MaterialTheme.typography.labelSmall)
-                Spacer(modifier = Modifier.height(4.dp))
-                if (chat.unreadCount > 0) {
-                    Badge (
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    ) {
-                        Text("${chat.unreadCount}")
+            },
+            trailingContent = {
+                Column (
+                    modifier = Modifier.fillMaxHeight(),
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.Top
+                )
+                {
+                    Text(converUnixTimeStampForChatList(chat.lastMessage?.date?.toLong() ?: 0L), style = MaterialTheme.typography.labelSmall)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    if (chat.unreadCount > 0) {
+                        Badge (
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ) {
+                            Text("${chat.unreadCount}")
+                        }
+                    }
+                }
+            },
+            leadingContent = {
+                Box(modifier = Modifier
+                    .size(48.dp)) {
+                    if (avatarPath != null) {
+                        AsyncImage(
+                            model = avatarPath,
+                            contentDescription = "Аватарка чата",
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                        )
+                    } else {
+                        // Показываем placeholder или индикатор загрузки
+                        Box(modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary)) {
+                            Text(
+                                text = chat.title?.firstOrNull()?.toString() ?: "Ч",
+                                modifier = Modifier.align(Alignment.Center),
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    }
+                    if(isOnline) {
+                        Box(modifier = Modifier.clip(CircleShape).size(16.dp).border(2.dp, MaterialTheme.colorScheme.background, CircleShape).background(MaterialTheme.colorScheme.primary).align(Alignment.BottomEnd))
                     }
                 }
             }
-        }
+        )
     }
 }
 
