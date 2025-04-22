@@ -6,7 +6,6 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.BitmapFactory
 import android.media.MediaRecorder
 import android.net.Uri
 import android.provider.Settings
@@ -23,7 +22,6 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -32,17 +30,14 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideIn
 import androidx.compose.animation.slideOut
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -55,7 +50,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -76,8 +70,6 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
-import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -96,66 +88,49 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.LinkAnnotation
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.rememberLottieComposition
 import com.xxcactussell.mategram.MainViewModel
 import com.xxcactussell.mategram.R
+import com.xxcactussell.mategram.formatCompactNumber
+import com.xxcactussell.mategram.getMimeType
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
+import com.xxcactussell.mategram.kotlinx.telegram.core.convertUnixTimestampToDate
 import com.xxcactussell.mategram.kotlinx.telegram.core.convertUnixTimestampToDateByDay
 import com.xxcactussell.mategram.kotlinx.telegram.core.formatFileSize
 import com.xxcactussell.mategram.kotlinx.telegram.core.getDayFromDate
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getBasicGroup
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getSupergroup
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
-import org.drinkless.tdlib.TdApi.MessagePhoto
-import org.drinkless.tdlib.TdApi.MessageReplyToMessage
-import org.drinkless.tdlib.TdApi.MessageText
-import org.drinkless.tdlib.TdApi.MessageVideo
-import org.drinkless.tdlib.TdApi.Video
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.unit.IntOffset
-import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
-import androidx.media3.common.util.UnstableApi
-import com.airbnb.lottie.compose.LottieAnimation
-import com.airbnb.lottie.compose.LottieCompositionSpec
-import com.airbnb.lottie.compose.animateLottieCompositionAsState
-import com.airbnb.lottie.compose.rememberLottieComposition
-import com.xxcactussell.mategram.formatCompactNumber
-import com.xxcactussell.mategram.getMimeType
-import com.xxcactussell.mategram.kotlinx.telegram.core.convertUnixTimestampToDate
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getBasicGroup
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getSupergroup
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import org.drinkless.tdlib.TdApi.BasicGroup
 import org.drinkless.tdlib.TdApi.ChatActionCancel
 import org.drinkless.tdlib.TdApi.ChatActionChoosingContact
@@ -182,8 +157,11 @@ import org.drinkless.tdlib.TdApi.MessageDocument
 import org.drinkless.tdlib.TdApi.MessageOriginChannel
 import org.drinkless.tdlib.TdApi.MessageOriginChat
 import org.drinkless.tdlib.TdApi.MessageOriginUser
-import org.drinkless.tdlib.TdApi.MessagePoll
+import org.drinkless.tdlib.TdApi.MessagePhoto
+import org.drinkless.tdlib.TdApi.MessageReplyToMessage
 import org.drinkless.tdlib.TdApi.MessageSticker
+import org.drinkless.tdlib.TdApi.MessageText
+import org.drinkless.tdlib.TdApi.MessageVideo
 import org.drinkless.tdlib.TdApi.MessageVoiceNote
 import org.drinkless.tdlib.TdApi.Supergroup
 import org.drinkless.tdlib.TdApi.User
@@ -192,13 +170,9 @@ import org.drinkless.tdlib.TdApi.UserStatusLastWeek
 import org.drinkless.tdlib.TdApi.UserStatusOffline
 import org.drinkless.tdlib.TdApi.UserStatusOnline
 import org.drinkless.tdlib.TdApi.UserTypeBot
+import org.drinkless.tdlib.TdApi.Video
 import java.io.File
 import kotlin.math.roundToInt
-
-private data class AlbumState(
-    val messages: MutableList<TdApi.Message> = mutableListOf(),
-    var currentAlbumId: Long = 0L
-)
 
 @Composable
 fun ChatDetailPane(
@@ -229,7 +203,7 @@ fun ChatDetailPane(
     val listState = rememberLazyListState()
     val downloadedFiles by viewModel.downloadedFiles.collectAsState()
     val photo = chat.photo?.small
-    var avatarPath by remember { mutableStateOf(downloadedFiles[chat?.photo?.small?.id]?.local?.path) }
+    var avatarPath by remember { mutableStateOf(downloadedFiles[chat.photo?.small?.id]?.local?.path) }
     var inputMessageToReply by remember { mutableStateOf<TdApi.InputMessageReplyTo?>(null) }
     var messageIdToReply by remember { mutableStateOf<Long?>(null) }
     var messageTextToReply by remember { mutableStateOf<String?>(null) }
@@ -422,8 +396,6 @@ fun ChatDetailPane(
             .fillMaxSize()
             .padding(innerPadding))
         {
-            val albumState = remember { AlbumState() }
-
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
@@ -495,7 +467,7 @@ fun ChatDetailPane(
                     fun shouldShowAuthorInfo(): Boolean {
                         return when {
                             message.isOutgoing -> false
-                            chat.type is TdApi.ChatTypePrivate -> false
+                            chat.type is ChatTypePrivate -> false
                             message.isChannelPost -> false
                             else -> {
                                 if (nextMessage == null) {
@@ -730,7 +702,7 @@ fun ChatDetailPane(
                                                                         // Загружаем следующую порцию сообщений
                                                                         viewModel.getMessagesForChat(
                                                                             chatId = chatId,
-                                                                            fromMessage = lastMessageId!!
+                                                                            fromMessage = lastMessageId
                                                                         )
 
                                                                         // Проверяем, появилось ли нужное сообщение
@@ -1260,9 +1232,6 @@ fun ChatBottomBar(
                 .padding(8.dp)
         ) {
             VoiceRecordButton(
-                modifier = Modifier
-                    .wrapContentSize()
-                    .align(Alignment.CenterEnd),
                 currentMessageMode = currentMessageMode,
                 onModeChange = {
                     onModeChange()
@@ -1286,7 +1255,6 @@ fun ChatBottomBar(
 @SuppressLint("DefaultLocale")
 @Composable
 fun VoiceRecordButton(
-    modifier: Modifier = Modifier,
     currentMessageMode: String,
     onModeChange: () -> Unit,
     onSendVoiceNote: (String) -> Unit,
@@ -1485,7 +1453,6 @@ fun VoiceRecordButton(
                     awaitEachGesture {
                         val down = awaitFirstDown()
                         var upBeforeTimeout = true
-
                         try {
                             withTimeout(300) {
                                 val up = waitForUpOrCancellation()
@@ -1675,7 +1642,7 @@ fun VoiceRecordButton(
     }
 }
 
-private suspend fun stopAndSendRecording(
+private fun stopAndSendRecording(
     recorder: MediaRecorder?,
     filePath: String?,
     onSendVoiceNote: (String) -> Unit
@@ -1823,7 +1790,6 @@ private fun MessageItem(
                 } else {
                     animationPath = animationInChat?.local?.path
                 }
-                Log.d("GIF_MSG", "${content.animation.mimeType}")
             }
 
             LaunchedEffect(downloadedFiles.values) {
@@ -1831,7 +1797,6 @@ private fun MessageItem(
                 if (downloadedFile?.local?.isDownloadingCompleted == true) {
                     animationPath = downloadedFile.local?.path
                 }
-                Log.d("GIF_MSG", "$animationPath")
             }
 
             val caption = content.caption
@@ -2180,7 +2145,7 @@ private fun MessageItem(
                     Row {
                         if (isDownloading) {
                             Text(
-                                text = formatFileSize(downloadedSize.toInt() ?: 0) + " / ",
+                                text = formatFileSize(downloadedSize.toInt()) + " / ",
                                 style = MaterialTheme.typography.labelMedium
                             )
                         }
@@ -2333,7 +2298,6 @@ private fun MessageItem(
                     is TdApi.StickerFormatTgs -> {
                         val tgsJson = viewModel.decompressTgs(stickerPath!!)
                         val composition by rememberLottieComposition(LottieCompositionSpec.JsonString(tgsJson))
-                        val progress by animateLottieCompositionAsState(composition)
 
                         LottieAnimation(
                             composition = composition,
@@ -2550,7 +2514,6 @@ fun ChatTopBar(
                         if (statusText.isNotEmpty()) {
                             ChatStatusText(
                                 status = statusText,
-                                modifier = Modifier.padding(top = 2.dp)
                             )
                         }
                     }
@@ -2571,7 +2534,6 @@ fun ChatTopBar(
 @Composable
 private fun ChatStatusText(
     status: String,
-    modifier: Modifier = Modifier
 ) {
     val isTyping = status.endsWith("...")
 
@@ -2587,7 +2549,7 @@ private fun ChatStatusText(
     )
 }
 
-fun TdApi.ChatType.isPrivate(): Boolean = this is TdApi.ChatTypePrivate
+fun TdApi.ChatType.isPrivate(): Boolean = this is ChatTypePrivate
 
 
 @Composable
