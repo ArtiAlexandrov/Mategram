@@ -11,6 +11,7 @@ import org.drinkless.tdlib.TdApi.MessageText
 import org.drinkless.tdlib.TdApi.MessageVideo
 import org.drinkless.tdlib.TdApi.MessageAudio
 import org.drinkless.tdlib.TdApi.MessageContact
+import org.drinkless.tdlib.TdApi.MessageDice
 import org.drinkless.tdlib.TdApi.MessageDocument
 import org.drinkless.tdlib.TdApi.MessagePoll
 import org.drinkless.tdlib.TdApi.MessageSticker
@@ -153,6 +154,13 @@ suspend fun getMessageContent(chatId: Long, messageId: Long, viewModel: MainView
             messageContent(
                 null,
                 (content.animatedEmoji.sticker?.emoji),
+                null
+            )
+        }
+        is MessageDice -> {
+            messageContent(
+                null,
+                (content.emoji),
                 null
             )
         }

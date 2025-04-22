@@ -2,25 +2,13 @@ package com.xxcactussell.mategram.kotlinx.telegram.core
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.util.Log
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.checkAuthenticationCode
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.checkAuthenticationPassword
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatFolder
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatHistory
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChats
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getFile
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.logOut
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.setAuthenticationPhoneNumber
-import com.xxcactussell.mategram.kotlinx.telegram.flows.newMessageFlow
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.shareIn
-import kotlinx.coroutines.launch
 import com.xxcactussell.mategram.kotlinx.telegram.extensions.ChatKtx
 import com.xxcactussell.mategram.kotlinx.telegram.extensions.UserKtx
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatActionFlow
@@ -30,15 +18,20 @@ import com.xxcactussell.mategram.kotlinx.telegram.flows.chatFoldersFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatLastMessageFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatPositionFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.chatReadInboxFlow
-import com.xxcactussell.mategram.kotlinx.telegram.flows.newChatFlow
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.fileFlow
-import com.xxcactussell.mategram.kotlinx.telegram.flows.userFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.newChatFlow
+import com.xxcactussell.mategram.kotlinx.telegram.flows.newMessageFlow
 import com.xxcactussell.mategram.kotlinx.telegram.flows.userStatusFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
-import org.drinkless.tdlib.TdApi.ChatListFolder
 import org.drinkless.tdlib.TdApi.Message
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -72,7 +65,6 @@ object TelegramRepository : UserKtx, ChatKtx {
 
     }
 
-
     fun sendCode(code: String) {
         coroutineScope.launch {
             println("Отправляем код подтверждения: $code")
@@ -97,27 +89,15 @@ object TelegramRepository : UserKtx, ChatKtx {
 
     val messageFlow: Flow<Message> = api.newMessageFlow()
 
-    val chatFoldersFlow: Flow<TdApi.UpdateChatPosition> = api.chatPositionFlow()
-
-    // Загрузка идентификаторов чатов с сервера
-    suspend fun loadChatIds(limit: Int = Int.MAX_VALUE): List<Long> {
-        return api.getChats(null, limit).chatIds.toList()
-    }
-
     // Загрузка деталей чата
     suspend fun loadChatDetails(chatId: Long): TdApi.Chat {
         return api.getChat(chatId)
-    }
-
-    suspend fun getFile(fileId: Int): TdApi.File {
-        return api.getFile(fileId)
     }
 
     suspend fun getMessagesForChat(chatId: Long, fromMessage: Long): TdApi.Messages {
         val result: TdApi.Messages = api.getChatHistory(chatId, fromMessage, 0, 50, false)
         return result
     }
-
 
     // Собираем события для loadchats
 

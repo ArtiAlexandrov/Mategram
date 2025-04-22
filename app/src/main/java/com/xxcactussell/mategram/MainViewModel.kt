@@ -1,30 +1,24 @@
 package com.xxcactussell.mategram
 
 import android.app.Application
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
-import android.net.Uri
-import android.os.Environment
-import android.provider.MediaStore
 import android.util.Log
 import android.webkit.MimeTypeMap
-import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
-import androidx.datastore.dataStoreFile
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.application
 import androidx.lifecycle.viewModelScope
 import com.xxcactussell.mategram.domain.entity.AuthState
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramCredentials
-import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramException
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.loadChatDetails
@@ -32,8 +26,8 @@ import com.xxcactussell.mategram.kotlinx.telegram.coroutines.addFileToDownloads
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.cancelDownloadFile
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.downloadFile
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatFolder
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMe
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.openChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.sendMessage
@@ -49,8 +43,10 @@ import com.xxcactussell.mategram.notifications.NotificationSettingsManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -64,30 +60,16 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withContext
 import org.drinkless.tdlib.TdApi
 import org.drinkless.tdlib.TdApi.Chat
 import org.drinkless.tdlib.TdApi.File
+import org.drinkless.tdlib.TdApi.MessageSenderUser
+import org.drinkless.tdlib.TdApi.User
 import java.io.ByteArrayOutputStream
 import java.io.FileInputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.GZIPInputStream
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.intPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatAdministrators
-import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChatFolder
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
-import org.drinkless.tdlib.TdApi.ChatListFolder
-import org.drinkless.tdlib.TdApi.ChatTypeBasicGroup
-import org.drinkless.tdlib.TdApi.ChatTypeSupergroup
-import org.drinkless.tdlib.TdApi.User
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = TelegramRepository
@@ -1097,7 +1079,153 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _chatPermissions.update { it + (chat.id to permissions) }
     }
 
+    private val _userFullInfo = MutableStateFlow<TdApi.UserFullInfo?>(null)
+    val userFullInfo: StateFlow<TdApi.UserFullInfo?> = _userFullInfo
 
+    private val _supergroupFullInfo = MutableStateFlow<TdApi.SupergroupFullInfo?>(null)
+    val supergroupFullInfo: StateFlow<TdApi.SupergroupFullInfo?> = _supergroupFullInfo
+
+    private val _basicGroupFullInfo = MutableStateFlow<TdApi.BasicGroupFullInfo?>(null)
+    val basicGroupFullInfo: StateFlow<TdApi.BasicGroupFullInfo?> = _basicGroupFullInfo
+
+
+    private val _userForView = MutableStateFlow<TdApi.User?>(null)
+    val userForView: StateFlow<TdApi.User?> = _userForView
+
+    private val _supergroupForView = MutableStateFlow<TdApi.Supergroup?>(null)
+    val supergroupForView: StateFlow<TdApi.Supergroup?> = _supergroupForView
+
+    private val _basicGroupForView = MutableStateFlow<TdApi.BasicGroup?>(null)
+    val basicGroupForView: StateFlow<TdApi.BasicGroup?> = _basicGroupForView
+
+
+    private val _membersOfGroup = MutableStateFlow<List<TdApi.User>?>(null)
+    val membersOfGroup: StateFlow<List<TdApi.User>?> = _membersOfGroup
+
+    private val _membersOfSuperGroup = MutableStateFlow<List<TdApi.User>?>(null)
+    val membersOfSuperGroup: StateFlow<List<TdApi.User>?> = _membersOfSuperGroup
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun loadMembers(info: TdApi.BasicGroupFullInfo?) {
+        viewModelScope.launch {
+            val members = mutableListOf<TdApi.User>()
+            val memberIds = info?.members?.map { it.memberId }?.filterIsInstance<TdApi.MessageSenderUser>() ?: emptyList()
+
+            // Собираем пользователей параллельно
+            memberIds.map { memberId ->
+                async {
+                    suspendCancellableCoroutine<TdApi.User?> { cont ->
+                        api.client?.send(TdApi.GetUser(memberId.userId)) { response ->
+                            cont.resume(response as? TdApi.User, null)
+                        }
+                    }
+                }
+            }.awaitAll().filterNotNull().let { users ->
+                members += users
+            }
+
+            _membersOfGroup.value = members
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun loadMembersFromSupergroup(info: TdApi.SupergroupFullInfo?, supergroupId: Long?) {
+        viewModelScope.launch {
+            val members = mutableListOf<TdApi.User>()
+            if (info != null && supergroupId != null && info.canGetMembers) {
+                val memberIds = suspendCancellableCoroutine<Array<TdApi.ChatMember>> { cont ->
+                    api.client?.send(TdApi.GetSupergroupMembers(supergroupId, null, 0, 200)) { result ->
+                        if (result is TdApi.ChatMembers) {
+                            cont.resume(result.members, null)
+                        } else {
+                            cont.resume(emptyArray(), null)
+                        }
+                    }
+                }
+
+                for (memberId in memberIds) {
+                    if (memberId.memberId is TdApi.MessageSenderUser) {
+                        val user = suspendCancellableCoroutine<TdApi.User?> { cont ->
+                            api.client?.send(TdApi.GetUser((memberId.memberId as TdApi.MessageSenderUser).userId)) { response ->
+                                cont.resume(response as? TdApi.User, null)
+                            }
+                        }
+                        if (user != null) members += user
+                    }
+                }
+            }
+            _membersOfSuperGroup.value = members
+        }
+    }
+
+    fun loadUser(userId: Long) {
+        viewModelScope.launch {
+            api.client?.send(TdApi.GetUser(userId)) { result ->
+                if (result is TdApi.User) {
+                    _userForView.value = result
+                }
+            }
+        }
+    }
+    fun loadSupergroup(supergroupId: Long) {
+        viewModelScope.launch {
+            api.client?.send(TdApi.GetSupergroup(supergroupId)) { result ->
+                if (result is TdApi.Supergroup) {
+                    _supergroupForView.value = result
+                }
+            }
+        }
+    }
+    fun loadBasicGroup(basicGroupId: Long) {
+        viewModelScope.launch {
+            api.client?.send(TdApi.GetBasicGroup(basicGroupId)) { result ->
+                if (result is TdApi.BasicGroup) {
+                    _basicGroupForView.value = result
+                }
+            }
+        }
+    }
+
+    fun loadUserFullInfo(userId: Long) {
+        viewModelScope.launch {
+            api.client?.send(TdApi.GetUserFullInfo(userId)) { result ->
+                if (result is TdApi.UserFullInfo) {
+                    _userFullInfo.value = result
+                }
+            }
+        }
+    }
+
+    fun loadSupergroupFullInfo(supergroupId: Long) {
+        viewModelScope.launch {
+            api.client?.send(TdApi.GetSupergroupFullInfo(supergroupId)) { result ->
+                if (result is TdApi.SupergroupFullInfo) {
+                    _supergroupFullInfo.value = result
+                }
+            }
+        }
+    }
+
+    fun loadBasicGroupFullInfo(basicGroupId: Long) {
+        viewModelScope.launch {
+            api.client?.send(TdApi.GetBasicGroupFullInfo(basicGroupId)) { result ->
+                if (result is TdApi.BasicGroupFullInfo) {
+                    _basicGroupFullInfo.value = result
+                }
+            }
+        }
+    }
+
+    private val _userProfilePhotos = MutableStateFlow<List<TdApi.ChatPhoto>>(emptyList())
+    val userProfilePhotos: StateFlow<List<TdApi.ChatPhoto>> = _userProfilePhotos
+
+    fun loadUserProfilePhotos(userId: Long, offset: Int = 0, limit: Int = 10) {
+        api.client?.send(TdApi.GetUserProfilePhotos(userId, offset, limit)) { result ->
+            if (result is TdApi.ChatPhotos) {
+                _userProfilePhotos.value = result.photos?.toList() ?: emptyList()
+            }
+        }
+    }
 }
 
 fun formatCompactNumber(number: Int): String {

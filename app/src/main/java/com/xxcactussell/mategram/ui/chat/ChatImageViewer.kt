@@ -53,8 +53,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -124,7 +122,7 @@ fun ChatImageViewer(
                 )
             )
         }
-    ) { innerPadding ->
+    ) {
         BackHandler(enabled = true) {
             onDismiss()
         }
@@ -386,7 +384,6 @@ private fun VideoControls(
             ) {
                 val duration = exoPlayer.duration.coerceAtLeast(0)
                 val position = exoPlayer.currentPosition.coerceAtLeast(0)
-                val bufferedPosition = exoPlayer.bufferedPosition.coerceAtLeast(0)
 
                 Slider(
                     value = position.toFloat(),

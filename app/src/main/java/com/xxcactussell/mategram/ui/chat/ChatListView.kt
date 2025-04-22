@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.Window
+import android.widget.Space
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
@@ -39,6 +40,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Badge
@@ -244,11 +246,10 @@ fun ChatListView(
             sheetState = bottomSheetState,
             dragHandle = { BottomSheetDefaults.DragHandle() },
             contentWindowInsets = { WindowInsets(0) },
-            modifier = Modifier.navigationBarsPadding()
         ) {
             ChatInfoContent(
                 chat = selectedChatForInfoPane!!,
-                modifier = Modifier.padding(bottom = 32.dp)
+                modifier = Modifier.navigationBarsPadding()
             )
         }
     }
@@ -350,66 +351,69 @@ fun ChatListView(
                                             println("РИСУЕМ $folder")
                                             FilterChip(
                                                 onClick = {
+                                                    val chatIdsWithPositionsAndLastMessage = chats
+                                                        .filter { it.positions != null && it.lastMessage?.id != 0L && it.lastMessage?.id != null  }
+                                                        .map { it.id }
+                                                        .toSet()
+
                                                     if (filterFolderChipValue == folder) {
                                                         filterFolderChipValue = null
                                                         pinnedChats = chats.filter { chat ->
-                                                            chat.positions?.firstOrNull()?.isPinned == true
+                                                            chat.positions?.firstOrNull()?.isPinned == true && chat.lastMessage?.id != 0L
                                                         }.map { it.id }
+                                                            .filter { it in chatIdsWithPositionsAndLastMessage }
                                                         includedChats = chats.filter { chat ->
-                                                            chat.positions?.firstOrNull()?.isPinned == false
+                                                            chat.positions?.firstOrNull()?.isPinned == false && chat.lastMessage?.id != 0L
                                                         }.map { it.id }
+                                                            .filter { it in chatIdsWithPositionsAndLastMessage }
+                                                            .toMutableList()
                                                     } else {
                                                         filterFolderChipValue = folder
-                                                        pinnedChats =
-                                                            folder.pinnedChatIds.toList()
-                                                        includedChats =
-                                                            folder.includedChatIds.toMutableList()
+                                                        pinnedChats = folder.pinnedChatIds.filter { it in chatIdsWithPositionsAndLastMessage }
+                                                        includedChats = folder.includedChatIds.filter { it in chatIdsWithPositionsAndLastMessage }.toMutableList()
 
                                                         scope.launch(Dispatchers.IO) {
-                                                            val filteredChats =
-                                                                chats.filter { chat ->
-                                                                    when {
-                                                                        folder.includeBots && chat.type is TdApi.ChatTypePrivate -> {
-                                                                            val userId =
-                                                                                (chat.type as TdApi.ChatTypePrivate).userId
-                                                                            val user =
-                                                                                api.getUser(
-                                                                                    userId
-                                                                                )
-                                                                            user.type is TdApi.UserTypeBot
-                                                                        }
-
-                                                                        folder.includeGroups && (chat.type is TdApi.ChatTypeBasicGroup ||
-                                                                                (chat.type is TdApi.ChatTypeSupergroup && !(chat.type as TdApi.ChatTypeSupergroup).isChannel)) -> true
-
-                                                                        folder.includeChannels && chat.type is TdApi.ChatTypeSupergroup &&
-                                                                                (chat.type as TdApi.ChatTypeSupergroup).isChannel -> true
-
-                                                                        folder.includeContacts && chat.type is TdApi.ChatTypePrivate &&
-                                                                                isUserContact((chat.type as TdApi.ChatTypePrivate).userId) -> true
-
-                                                                        folder.includeNonContacts && chat.type is TdApi.ChatTypePrivate &&
-                                                                                !isUserContact((chat.type as TdApi.ChatTypePrivate).userId) -> true
-
-                                                                        else -> false
+                                                            val filteredChats = chats.filter { chat ->
+                                                                chat.positions != null && chat.lastMessage?.id != 0L && chat.lastMessage?.id != null && when {
+                                                                    folder.includeBots && chat.type is TdApi.ChatTypePrivate -> {
+                                                                        val userId = (chat.type as TdApi.ChatTypePrivate).userId
+                                                                        val user = api.getUser(userId)
+                                                                        user.type is TdApi.UserTypeBot
                                                                     }
+                                                                    folder.includeGroups && (chat.type is TdApi.ChatTypeBasicGroup ||
+                                                                            (chat.type is TdApi.ChatTypeSupergroup && !(chat.type as TdApi.ChatTypeSupergroup).isChannel)) -> true
+                                                                    folder.includeChannels && chat.type is TdApi.ChatTypeSupergroup &&
+                                                                            (chat.type as TdApi.ChatTypeSupergroup).isChannel -> true
+                                                                    folder.includeContacts && chat.type is TdApi.ChatTypePrivate &&
+                                                                            isUserContact((chat.type as TdApi.ChatTypePrivate).userId) -> true
+                                                                    folder.includeNonContacts && chat.type is TdApi.ChatTypePrivate &&
+                                                                            !isUserContact((chat.type as TdApi.ChatTypePrivate).userId) -> true
+                                                                    else -> false
                                                                 }
+                                                            }
 
-                                                            includedChats += filteredChats.map { it.id }
+                                                            val filteredIds = filteredChats.map { it.id }
+                                                            includedChats = (includedChats + filteredIds)
+                                                                .distinct()
+                                                                .filter { it in chatIdsWithPositionsAndLastMessage }
+                                                                .toMutableList()
 
                                                             if (folder.excludeRead) {
-                                                                includedChats =
-                                                                    includedChats.filter { chatId ->
-                                                                        api.getChat(chatId).unreadCount > 0
-                                                                    }.toMutableList()
+                                                                includedChats = includedChats.filter { chatId ->
+                                                                    val chat = chats.find { it.id == chatId }
+                                                                    chat?.positions != null && chat.lastMessage?.id != 0L && (chat.unreadCount ?: 0) > 0
+                                                                }.toMutableList()
                                                             }
 
                                                             if (folder.excludeMuted) {
-                                                                includedChats =
-                                                                    includedChats.filter { chatId ->
-                                                                        api.getChat(chatId).notificationSettings.muteFor == 0
-                                                                    }.toMutableList()
+                                                                includedChats = includedChats.filter { chatId ->
+                                                                    val chat = chats.find { it.id == chatId }
+                                                                    chat?.positions != null && chat.lastMessage?.id != 0L && chat.notificationSettings?.muteFor == 0
+                                                                }.toMutableList()
                                                             }
+
+                                                            // Финальная фильтрация только по существующим чатам с positions и lastMessage.id != 0L
+                                                            includedChats = includedChats.filter { it in chatIdsWithPositionsAndLastMessage }.toMutableList()
                                                         }
                                                     }
                                                 },
@@ -421,9 +425,25 @@ fun ChatListView(
                                     }
                                 }
                                 // Закрепленные чаты
-                                items(chats.filter {
-                                    it.id in pinnedChats && it.id != (chatMe?.id ?: 0L)
-                                }) { chat ->
+
+                                val pinnedChatsToShow = chats.filter { it.id in pinnedChats && it.id != (chatMe?.id ?: 0L) } // ваш фильтр
+                                if (pinnedChatsToShow.isNotEmpty()) {
+                                    item {
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            "Закрепленные чаты",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            modifier = Modifier.padding(horizontal = 16.dp)
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                    }
+                                }
+                                itemsIndexed(pinnedChatsToShow) { index, chat ->
+                                    val shape = when (index) {
+                                        0 -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomEnd = 4.dp, bottomStart = 4.dp)
+                                        pinnedChatsToShow.lastIndex -> RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp, bottomEnd = 24.dp, bottomStart = 24.dp)
+                                        else -> RoundedCornerShape(4.dp)
+                                    }
                                     ChatItem(
                                         chat = chat,
                                         viewModel = viewModel,
@@ -439,15 +459,31 @@ fun ChatListView(
                                             }
                                         },
                                         downloadedFiles = downloadedFiles,
-                                        userStatuses = userStatuses
+                                        userStatuses = userStatuses,
+                                        shape = shape
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                 }
 
                                 // Обычные чаты
-                                items(chats.filter {
-                                    it.id in includedChats && it.id != (chatMe?.id ?: 0L)
-                                }) { chat ->
+                                val regularChatsToShow = chats.filter { it.id in includedChats && it.id != (chatMe?.id ?: 0L) } // ваш фильтр
+                                if (regularChatsToShow.isNotEmpty()) {
+                                    item {
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            "Все чаты",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            modifier = Modifier.padding(horizontal = 16.dp)
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                    }
+                                }
+                                itemsIndexed(regularChatsToShow) { index, chat ->
+                                    val shape = when (index) {
+                                        0 -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomEnd = 4.dp, bottomStart = 4.dp)
+                                        regularChatsToShow.lastIndex -> RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp, bottomEnd = 24.dp, bottomStart = 24.dp)
+                                        else -> RoundedCornerShape(4.dp)
+                                    }
                                     ChatItem(
                                         chat = chat,
                                         viewModel = viewModel,
@@ -463,7 +499,8 @@ fun ChatListView(
                                             }
                                         },
                                         downloadedFiles = downloadedFiles,
-                                        userStatuses = userStatuses
+                                        userStatuses = userStatuses,
+                                        shape = shape
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                 }
@@ -611,13 +648,14 @@ private fun ChatItem(
     isSelected: Boolean,
     onChatClick: (chatId: Long) -> Unit,
     downloadedFiles:  MutableMap<Int, TdApi. File?>,
-    userStatuses: Map<Long, MainViewModel. ChatInfo>
+    userStatuses: Map<Long, MainViewModel. ChatInfo>,
+    shape: RoundedCornerShape
 ) {
     // Существующий код ChatItem с добавлением выделения для выбранного чата
     val containerColorCard = when {
         isSelected -> MaterialTheme.colorScheme.primaryContainer
         chat.unreadCount > 0 -> MaterialTheme.colorScheme.secondaryContainer
-        else -> Color.Transparent
+        else -> MaterialTheme.colorScheme.surfaceContainer
     }
     val scope = rememberCoroutineScope()
     var user by remember { mutableStateOf<Any?>(null) }
@@ -688,7 +726,6 @@ private fun ChatItem(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .clip(RoundedCornerShape(24.dp))
             .clickable {
                 scope.launch {
                     onChatClick(chat.id)
@@ -697,7 +734,7 @@ private fun ChatItem(
         colors = CardDefaults.cardColors(
             containerColor = containerColorCard
         ),
-        shape = RoundedCornerShape(24.dp)
+        shape = shape
     ) {
         Row(modifier = Modifier.padding(16.dp)) {
             Box(modifier = Modifier
