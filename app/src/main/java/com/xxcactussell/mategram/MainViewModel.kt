@@ -13,8 +13,6 @@ import androidx.core.content.FileProvider
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.xxcactussell.mategram.domain.entity.AuthState
@@ -64,6 +62,8 @@ import org.drinkless.tdlib.TdApi
 import org.drinkless.tdlib.TdApi.Chat
 import org.drinkless.tdlib.TdApi.File
 import org.drinkless.tdlib.TdApi.MessageSenderUser
+import org.drinkless.tdlib.TdApi.StickerFullType
+import org.drinkless.tdlib.TdApi.StickerFullTypeCustomEmoji
 import org.drinkless.tdlib.TdApi.User
 import java.io.ByteArrayOutputStream
 import java.io.FileInputStream
@@ -126,7 +126,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 Log.e("MainViewModel", "Error setting TDLib parameters", e)
                             }
                         }
-                        else -> { /* ignore other states here */ }
+
+                        else -> { /* ignore other states here */
+                        }
                     }
                 }
                 .map { state ->
@@ -135,22 +137,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             Log.d("MainViewModel", "Mapped: Waiting for TDLib parameters")
                             AuthState.WaitTdlibParameters
                         }
+
                         is TdApi.AuthorizationStateWaitPhoneNumber -> {
                             Log.d("MainViewModel", "Mapped: Waiting for phone")
                             AuthState.WaitPhone
                         }
+
                         is TdApi.AuthorizationStateWaitCode -> {
                             Log.d("MainViewModel", "Mapped: Waiting for code")
                             AuthState.WaitCode
                         }
+
                         is TdApi.AuthorizationStateWaitPassword -> {
                             Log.d("MainViewModel", "Mapped: Waiting for password")
                             AuthState.WaitPassword
                         }
+
                         is TdApi.AuthorizationStateReady -> {
                             Log.d("MainViewModel", "Mapped: Ready")
                             AuthState.Ready
                         }
+
                         else -> {
                             Log.d("MainViewModel", "Mapped: Unknown state: $state")
                             AuthState.NoAuth
@@ -165,6 +172,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
         }
     }
+
     private val _navigationEvent = MutableSharedFlow<Long>()
     val navigationEvent = _navigationEvent.asSharedFlow()
 
@@ -207,7 +215,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private var _me = MutableStateFlow<TdApi.User?>(null)
-    val me : StateFlow<TdApi.User?> = _me
+    val me: StateFlow<TdApi.User?> = _me
 
     init {
         observeAuthorizationState()
@@ -252,8 +260,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
     }
-
-
 
 
     private val _visibleChats = MutableStateFlow<List<Chat>>(emptyList())
@@ -324,30 +330,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun handleChatPosition(update: TdApi.UpdateChatPosition) {
         val chatId = update.chatId
-        Log.d("ChatUpdater" , "$chatId")
+        Log.d("ChatUpdater", "$chatId")
         handleChatUpdate(api.getChat(chatId))
     }
 
     private suspend fun handleChatDraft(update: TdApi.UpdateChatDraftMessage) {
         val chatId = update.chatId
-        Log.d("ChatUpdater" , "$chatId")
+        Log.d("ChatUpdater", "$chatId")
         handleChatUpdate(api.getChat(chatId))
     }
 
     private suspend fun handleChatAddedToList(update: TdApi.UpdateChatAddedToList) {
         val chatId = update.chatId
-        Log.d("ChatUpdater" , "$chatId")
+        Log.d("ChatUpdater", "$chatId")
         handleChatUpdate(api.getChat(chatId))
     }
 
     private suspend fun handleChatLastMessage(update: TdApi.UpdateChatLastMessage) {
         val chatId = update.chatId
-        Log.d("ChatUpdater" , "$chatId")
+        Log.d("ChatUpdater", "$chatId")
         handleChatUpdate(api.getChat(chatId))
     }
 
     private fun handleNewChatUpdate(chat: Chat) {
-        Log.d("ChatUpdater" , "${chat.id}")
+        Log.d("ChatUpdater", "${chat.id}")
         handleChatUpdate(chat)
     }
 
@@ -377,7 +383,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-
 
 
     private var _chatFolders = MutableStateFlow<List<TdApi.ChatFolder>>(emptyList())
@@ -441,7 +446,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun sendVoiceNote(chatId: Long, filePath: String, replyToMessageId: TdApi.InputMessageReplyTo?) {
+    fun sendVoiceNote(
+        chatId: Long,
+        filePath: String,
+        replyToMessageId: TdApi.InputMessageReplyTo?
+    ) {
         viewModelScope.launch {
             try {
                 val inputFile = TdApi.InputFileLocal(filePath)
@@ -475,11 +484,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
     private fun getAudioDuration(filePath: String): Int {
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(filePath)
-            val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            val durationStr =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
             (durationStr?.toLong() ?: 0L).toInt() / 1000 // Convert milliseconds to seconds
         } catch (e: Exception) {
             Log.e("MainViewModel", "Error getting audio duration: ${e.message}")
@@ -496,14 +507,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         try {
             retriever.setDataSource(filePath)
-            val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 0
+            val durationMs =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong()
+                    ?: 0
 
             val mediaExtractor = MediaExtractor()
             mediaExtractor.setDataSource(filePath)
 
             // Find the audio track
             val audioTrackIndex = (0 until mediaExtractor.trackCount)
-                .find { mediaExtractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+                .find {
+                    mediaExtractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)
+                        ?.startsWith("audio/") == true
+                }
                 ?: return ByteArray(100) { 50.toByte() } // Default waveform if no audio track found
 
             mediaExtractor.selectTrack(audioTrackIndex)
@@ -518,7 +534,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val samplesPerPoint = samples / waveform.size
 
             // Read audio data
-            val decoder = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME) ?: "audio/mp4a-latm")
+            val decoder = MediaCodec.createDecoderByType(
+                format.getString(MediaFormat.KEY_MIME) ?: "audio/mp4a-latm"
+            )
             decoder.configure(format, null, null, 0)
             decoder.start()
 
@@ -535,9 +553,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val sampleSize = mediaExtractor.readSampleData(buffer!!, 0)
 
                     if (sampleSize < 0) {
-                        decoder.queueInputBuffer(inputBufferId, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        decoder.queueInputBuffer(
+                            inputBufferId,
+                            0,
+                            0,
+                            0,
+                            MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                        )
                     } else {
-                        decoder.queueInputBuffer(inputBufferId, 0, sampleSize, mediaExtractor.sampleTime, 0)
+                        decoder.queueInputBuffer(
+                            inputBufferId,
+                            0,
+                            sampleSize,
+                            mediaExtractor.sampleTime,
+                            0
+                        )
                         mediaExtractor.advance()
                     }
                 }
@@ -555,7 +585,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                             if (samplesRead >= samplesPerPoint) {
                                 // Convert to 5-bit format (0-31 range) as required by TDLib
-                                waveform[currentWaveformIndex] = (maxAmplitude * 31).toInt().toByte()
+                                waveform[currentWaveformIndex] =
+                                    (maxAmplitude * 31).toInt().toByte()
                                 currentWaveformIndex++
                                 maxAmplitude = 0.0f
                                 samplesRead = 0
@@ -585,7 +616,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return waveform
     }
 
-    fun sendMessage(chatId: Long, text: String, replyToMessageId: TdApi.InputMessageReplyTo? = null) {
+    fun sendMessage(
+        chatId: Long,
+        text: String,
+        replyToMessageId: TdApi.InputMessageReplyTo? = null
+    ) {
         viewModelScope.launch {
             val inputMessage = TdApi.InputMessageText(
                 TdApi.FormattedText(text, null),
@@ -622,12 +657,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    suspend fun addFileToDownloads(file: TdApi.File, chatId: Long, messageId: Long, priority: Int = 32) {
+    suspend fun addFileToDownloads(
+        file: TdApi.File,
+        chatId: Long,
+        messageId: Long,
+        priority: Int = 32
+    ) {
         api.addFileToDownloads(file.id, chatId, messageId, priority)
     }
 
     fun installApk(context: Context, apkPath: String) {
-        val apkUri = FileProvider.getUriForFile(context, "${context.packageName}.provider",
+        val apkUri = FileProvider.getUriForFile(
+            context, "${context.packageName}.provider",
             java.io.File(apkPath)
         )
 
@@ -687,7 +728,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun getMessageById(replyMessage: TdApi.MessageReplyToMessage): TdApi.Message? {
         return try {
             suspendCancellableCoroutine { continuation ->
-                api.client?.send(TdApi.GetMessage(replyMessage.chatId, replyMessage.messageId)) { response ->
+                api.client?.send(
+                    TdApi.GetMessage(
+                        replyMessage.chatId,
+                        replyMessage.messageId
+                    )
+                ) { response ->
                     if (response is TdApi.Message) {
                         continuation.resume(response) { }
                     } else {
@@ -711,6 +757,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             // Open chat
                             TdApi.OpenChat(chatId)
                         }
+
                         else -> {
                             Log.e("MainViewModel", "TDLib not ready when opening chat")
                         }
@@ -733,20 +780,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         PreferenceDataStoreFactory.create(
             produceFile = { context.filesDir.resolve("chat_scroll_positions.preferences_pb") }
         )
-    }
-
-    fun saveScrollPosition(chatId: Long, index: Int) {
-        viewModelScope.launch {
-            dataStore.edit { preferences ->
-                preferences[intPreferencesKey("scroll_position_$chatId")] = index
-            }
-        }
-    }
-
-    fun getScrollPosition(chatId: Long): Flow<Int> {
-        return dataStore.data.map { preferences ->
-            preferences[intPreferencesKey("scroll_position_$chatId")] ?: 0
-        }
     }
 
     private val _userStatuses = MutableStateFlow<Map<Long, ChatInfo>>(emptyMap())
@@ -828,7 +861,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         api.client?.send(TdApi.GetUser(type.userId)) { result ->
                             val user = result as TdApi.User
                             // For private chats, we need to check if the user is blocked
-                            api.client?.send(TdApi.GetBlockedMessageSenders(TdApi.BlockListMain(), 0, 100)) { blocked ->
+                            api.client?.send(
+                                TdApi.GetBlockedMessageSenders(
+                                    TdApi.BlockListMain(),
+                                    0,
+                                    100
+                                )
+                            ) { blocked ->
                                 val blockedList = (blocked as TdApi.MessageSenders).senders
                                 val isBlocked = blockedList.any { sender ->
                                     (sender as? TdApi.MessageSenderUser)?.userId == user.id
@@ -858,7 +897,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     is TdApi.ChatTypeBasicGroup -> {
                         api.client?.send(TdApi.GetBasicGroupFullInfo(type.basicGroupId)) { result ->
                             val info = result as TdApi.BasicGroupFullInfo
-                            api.client?.send(TdApi.GetChatMember(chat.id, TdApi.MessageSenderUser(me.value?.id ?: 0L))) { memberResult ->
+                            api.client?.send(
+                                TdApi.GetChatMember(
+                                    chat.id,
+                                    TdApi.MessageSenderUser(me.value?.id ?: 0L)
+                                )
+                            ) { memberResult ->
                                 val member = memberResult as TdApi.ChatMember
                                 updatePermissionsForMember(chat, member)
                             }
@@ -868,7 +912,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     is TdApi.ChatTypeSupergroup -> {
                         api.client?.send(TdApi.GetSupergroupFullInfo(type.supergroupId)) { result ->
                             val info = result as TdApi.SupergroupFullInfo
-                            api.client?.send(TdApi.GetChatMember(chat.id, TdApi.MessageSenderUser(me.value?.id ?: 0L))) { memberResult ->
+                            api.client?.send(
+                                TdApi.GetChatMember(
+                                    chat.id,
+                                    TdApi.MessageSenderUser(me.value?.id ?: 0L)
+                                )
+                            ) { memberResult ->
                                 val member = memberResult as TdApi.ChatMember
                                 if (type.isChannel) {
                                     updateChannelPermissions(chat, member, info)
@@ -900,12 +949,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     canSendPolls = true,
                     canSendOtherMessages = true,
                     canAddLinkPreviews = true,
-                    canChangeInfo =  true,
-                    canInviteUsers =  true,
-                    canPinMessages =  true,
+                    canChangeInfo = true,
+                    canInviteUsers = true,
+                    canPinMessages = true,
                     canCreateTopics = false // Basic groups don't support topics
                 )
             }
+
             is TdApi.ChatMemberStatusAdministrator -> {
                 val adminRights = member.status as TdApi.ChatMemberStatusAdministrator
                 ChatPermissions(
@@ -925,6 +975,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     canCreateTopics = false // Basic groups don't support topics
                 )
             }
+
             is TdApi.ChatMemberStatusMember -> ChatPermissions(
                 canSendBasicMessages = !chat.hasProtectedContent,
                 canSendAudios = !chat.hasProtectedContent,
@@ -937,6 +988,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 canSendOtherMessages = !chat.hasProtectedContent,
                 canAddLinkPreviews = !chat.hasProtectedContent
             )
+
             is TdApi.ChatMemberStatusRestricted -> {
                 val restrictions = member.status as TdApi.ChatMemberStatusRestricted
                 ChatPermissions(
@@ -952,12 +1004,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     canAddLinkPreviews = restrictions.permissions.canAddLinkPreviews
                 )
             }
+
             else -> ChatPermissions()
         }
         _chatPermissions.update { it + (chat.id to permissions) }
     }
 
-    private fun updateChannelPermissions(chat: TdApi.Chat, member: TdApi.ChatMember, info: TdApi.SupergroupFullInfo) {
+    private fun updateChannelPermissions(
+        chat: TdApi.Chat,
+        member: TdApi.ChatMember,
+        info: TdApi.SupergroupFullInfo
+    ) {
         val permissions = when (member.status) {
             is TdApi.ChatMemberStatusAdministrator -> {
                 val adminRights = member.status as TdApi.ChatMemberStatusAdministrator
@@ -978,6 +1035,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     canCreateTopics = false // Channels don't support topics
                 )
             }
+
             is TdApi.ChatMemberStatusCreator -> {
                 ChatPermissions(
                     canSendBasicMessages = true,
@@ -996,13 +1054,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     canCreateTopics = false // Channels don't support topics
                 )
             }
+
             else -> ChatPermissions()
         }
         _chatPermissions.update { it + (chat.id to permissions) }
     }
 
 
-    private fun updateSupergroupPermissions(chat: TdApi.Chat, member: TdApi.ChatMember, info: TdApi.SupergroupFullInfo) {
+    private fun updateSupergroupPermissions(
+        chat: TdApi.Chat,
+        member: TdApi.ChatMember,
+        info: TdApi.SupergroupFullInfo
+    ) {
         // Similar to updateForumPermissions but without topic creation
         val permissions = when (member.status) {
             is TdApi.ChatMemberStatusAdministrator -> {
@@ -1024,6 +1087,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     canCreateTopics = false
                 )
             }
+
             is TdApi.ChatMemberStatusCreator -> {
                 ChatPermissions(
                     canSendBasicMessages = true,
@@ -1058,6 +1122,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     canCreateTopics = false
                 )
             }
+
             is TdApi.ChatMemberStatusRestricted -> {
                 val restrictions = member.status as TdApi.ChatMemberStatusRestricted
                 ChatPermissions(
@@ -1074,6 +1139,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     canCreateTopics = restrictions.permissions.canCreateTopics
                 )
             }
+
             else -> ChatPermissions()
         }
         _chatPermissions.update { it + (chat.id to permissions) }
@@ -1109,7 +1175,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun loadMembers(info: TdApi.BasicGroupFullInfo?) {
         viewModelScope.launch {
             val members = mutableListOf<TdApi.User>()
-            val memberIds = info?.members?.map { it.memberId }?.filterIsInstance<TdApi.MessageSenderUser>() ?: emptyList()
+            val memberIds =
+                info?.members?.map { it.memberId }?.filterIsInstance<TdApi.MessageSenderUser>()
+                    ?: emptyList()
 
             // Собираем пользователей параллельно
             memberIds.map { memberId ->
@@ -1134,7 +1202,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val members = mutableListOf<TdApi.User>()
             if (info != null && supergroupId != null && info.canGetMembers) {
                 val memberIds = suspendCancellableCoroutine<Array<TdApi.ChatMember>> { cont ->
-                    api.client?.send(TdApi.GetSupergroupMembers(supergroupId, null, 0, 200)) { result ->
+                    api.client?.send(
+                        TdApi.GetSupergroupMembers(
+                            supergroupId,
+                            null,
+                            0,
+                            200
+                        )
+                    ) { result ->
                         if (result is TdApi.ChatMembers) {
                             cont.resume(result.members, null)
                         } else {
@@ -1167,6 +1242,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
     fun loadSupergroup(supergroupId: Long) {
         viewModelScope.launch {
             api.client?.send(TdApi.GetSupergroup(supergroupId)) { result ->
@@ -1176,6 +1252,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
     fun loadBasicGroup(basicGroupId: Long) {
         viewModelScope.launch {
             api.client?.send(TdApi.GetBasicGroup(basicGroupId)) { result ->
@@ -1224,6 +1301,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (result is TdApi.ChatPhotos) {
                 _userProfilePhotos.value = result.photos?.toList() ?: emptyList()
             }
+        }
+    }
+
+
+    private val _customEmojiMapFlow = MutableStateFlow<Map<Long, String>>(emptyMap())
+    val customEmojiMapFlow: StateFlow<Map<Long, String>> = _customEmojiMapFlow.asStateFlow()
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun loadCustomEmojis(formattedText: TdApi.FormattedText) {
+        viewModelScope.launch {
+            val emojiIds = formattedText.entities
+                ?.filter { it.type is TdApi.TextEntityTypeCustomEmoji }
+                ?.map { (it.type as TdApi.TextEntityTypeCustomEmoji).customEmojiId }
+                ?.distinct()
+                ?: emptyList()
+
+            if (emojiIds.isEmpty()) return@launch
+
+            val stickers = suspendCancellableCoroutine<TdApi.Stickers?> { cont ->
+                api.client?.send(TdApi.GetCustomEmojiStickers(emojiIds.toLongArray())) { result ->
+                    cont.resume(result as? TdApi.Stickers, null)
+                }
+            }
+
+            // Копируем текущую map, чтобы не терять уже загруженные эмодзи
+            val currentMap = _customEmojiMapFlow.value.toMutableMap()
+
+            stickers?.stickers?.forEach { sticker ->
+                val id = (sticker.fullType as TdApi.StickerFullTypeCustomEmoji).customEmojiId
+                if (currentMap.containsKey(id)) return@forEach // Уже есть, пропускаем
+
+                val file = sticker.sticker
+                val path = file?.local?.path
+                val isDownloaded = file?.local?.isDownloadingCompleted == true
+
+                if (isDownloaded && !path.isNullOrEmpty()) {
+                    currentMap[id] = path
+                } else if (file != null && file.local?.isDownloadingCompleted == false) {
+                    // Запускаем загрузку файла, если он не скачан
+                    downloadFile(file)
+                }
+            }
+            _customEmojiMapFlow.value = currentMap
         }
     }
 }

@@ -5,8 +5,10 @@ androidGifDrawable = "1.2.28"
 animation = "1.7.8"
 coilCompose = "2.6.0"
 coilGif = "2.2.2"
-datastorePreferences = "1.1.4"
-datastorePreferencesCore = "1.1.4"
+datastorePreferences = "1.1.5"
+datastorePreferencesCore = "1.1.5"
+ffmpegKitFull = "6.0"
+ffmpegKitMin = "6.0"
 firebaseBom = "33.12.0"
 gson = "2.12.1"
 kotlin = "2.0.0"
@@ -19,18 +21,19 @@ activityCompose = "1.10.1"
 composeBom = "2025.04.00"
 lottieCompose = "6.0.0"
 material3 = "1.4.0-alpha12"
+mobileFfmpegFull = "4.5.LTS"
 roomCommon = "2.7.0"
 roomKtx = "2.7.0"
 navigationRuntimeAndroid = "2.9.0-beta01"
 navigationCompose = "2.8.9"
-workRuntimeKtx = "2.10.0"
-media3Ui = "1.6.0"
-media3Exoplayer = "1.6.0"
+workRuntimeKtx = "2.10.1"
+media3Ui = "1.6.1"
+media3Exoplayer = "1.6.1"
 adaptiveNavigationAndroid = "1.1.0"
+webkit = "1.13.0"
 
 [libraries]
 accompanist-navigation-animation = { module = "com.google.accompanist:accompanist-navigation-animation", version.ref = "accompanistNavigationAnimation" }
-android-gif-drawable = { module = "pl.droidsonroids.gif:android-gif-drawable", version.ref = "androidGifDrawable" }
 androidx-adaptive = { module = "androidx.compose.material3.adaptive:adaptive" }
 androidx-adaptive-layout = { module = "androidx.compose.material3.adaptive:adaptive-layout" }
 androidx-adaptive-navigation = { module = "androidx.compose.material3.adaptive:adaptive-navigation" }
@@ -41,6 +44,7 @@ androidx-datastore-preferences-core = { module = "androidx.datastore:datastore-p
 androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycleRuntimeKtx" }
 coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coilCompose" }
 coil-gif = { module = "io.coil-kt:coil-gif", version.ref = "coilGif" }
+ffmpeg-kit-min = { module = "com.arthenica:ffmpeg-kit-min", version.ref = "ffmpegKitMin" }
 firebase-analytics = { module = "com.google.firebase:firebase-analytics" }
 firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebaseBom" }
 firebase-messaging = { module = "com.google.firebase:firebase-messaging" }
@@ -68,6 +72,8 @@ androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplaye
 androidx-adaptive-navigation-android = { group = "androidx.compose.material3.adaptive", name = "adaptive-navigation-android", version.ref = "adaptiveNavigationAndroid" }
 lottie-compose = { module = "com.airbnb.android:lottie-compose", version.ref = "lottieCompose" }
 material3 = { module = "androidx.compose.material3:material3", version.ref = "material3" }
+mobile-ffmpeg-full = { module = "com.arthenica:mobile-ffmpeg-full", version.ref = "mobileFfmpegFull" }
+androidx-webkit = { group = "androidx.webkit", name = "webkit", version.ref = "webkit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

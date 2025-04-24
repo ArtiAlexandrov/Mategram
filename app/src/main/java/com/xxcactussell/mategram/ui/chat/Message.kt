@@ -1,8 +1,13 @@
 package com.xxcactussell.mategram.ui.chat
 
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.graphics.BitmapFactory
+import android.net.Uri
+import android.provider.Settings
 import android.util.Log
+import android.widget.Toast
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -20,12 +25,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,10 +45,13 @@ import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
 import androidx.compose.material3.carousel.rememberCarouselState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,10 +61,14 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -59,20 +76,43 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.FileProvider
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.rememberLottieComposition
 import com.xxcactussell.mategram.MainViewModel
 import com.xxcactussell.mategram.R
+import com.xxcactussell.mategram.getMimeType
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
+import com.xxcactussell.mategram.kotlinx.telegram.core.formatFileSize
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
+import com.xxcactussell.mategram.ui.StickerPlayer
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
+import org.drinkless.tdlib.TdApi.MessageAnimatedEmoji
+import org.drinkless.tdlib.TdApi.MessageAnimation
+import org.drinkless.tdlib.TdApi.MessageDice
+import org.drinkless.tdlib.TdApi.MessageDocument
 import org.drinkless.tdlib.TdApi.MessagePhoto
 import org.drinkless.tdlib.TdApi.MessageReplyToMessage
+import org.drinkless.tdlib.TdApi.MessageSticker
+import org.drinkless.tdlib.TdApi.MessageText
 import org.drinkless.tdlib.TdApi.MessageVideo
+import org.drinkless.tdlib.TdApi.MessageVoiceNote
 import org.drinkless.tdlib.TdApi.Video
+import java.io.File
 import kotlin.math.roundToInt
 
 @Composable
@@ -80,6 +120,889 @@ fun Message() {
 
 }
 
+
+@androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+fun MessageItem(
+    viewModel: MainViewModel,
+    idMessageOfVoiceNote: Long?,
+    messageId: Long,
+    isVoicePlaying: Boolean,
+    onMediaClick: (Long) -> Unit,
+    chatId: Long,
+    onTogglePlay: (Long, MessageVoiceNote, Long) -> Unit,
+    item: TdApi.Message,
+    downloadedFiles: MutableMap<Int, TdApi.File?>
+) {
+    val scope = rememberCoroutineScope()
+    val customEmojiMap by viewModel.customEmojiMapFlow.collectAsState() // customEmojiId -> path
+
+    when (val content = item.content) {
+        is MessageText -> {
+            val formattedText = content.text
+
+            LaunchedEffect(formattedText) {
+                viewModel.loadCustomEmojis(formattedText)
+            }
+            // Собираем inlineContent для всех кастомных эмодзи
+            val inlineContent = remember(customEmojiMap, formattedText, downloadedFiles) {
+                val map = mutableMapOf<String, InlineTextContent>()
+                formattedText?.entities?.forEach { entity ->
+                    if (entity.type is TdApi.TextEntityTypeCustomEmoji) {
+                        val emojiId = (entity.type as TdApi.TextEntityTypeCustomEmoji).customEmojiId
+                        val path = customEmojiMap[emojiId]
+                        if (path != null) {
+                            map[emojiId.toString()] = InlineTextContent(
+                                Placeholder(24.sp, 24.sp, PlaceholderVerticalAlign.Center)
+                            ) {
+                                when {
+                                    path.endsWith(".tgs") -> {
+                                        val tgsJson = viewModel.decompressTgs(path)
+                                        val composition by rememberLottieComposition(LottieCompositionSpec.JsonString(tgsJson))
+                                        LottieAnimation(
+                                            composition = composition,
+                                            iterations = Int.MAX_VALUE,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    path.endsWith(".webp") -> {
+                                        AsyncImage(
+                                            model = path,
+                                            contentDescription = "Custom emoji",
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    path.endsWith(".webm") -> {
+                                        StickerPlayer(
+                                            path,
+                                            Modifier.size(24.dp)
+                                        )
+                                    }
+                                    else -> {
+                                        Spacer(modifier = Modifier.size(24.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                map
+            }
+
+            Text(
+                modifier = Modifier.padding(16.dp),
+                text = getAnnotatedString(formattedText),
+                style = MaterialTheme.typography.bodyMedium,
+                inlineContent = inlineContent
+            )
+        }
+        is MessageVideo -> {
+            val videoContent = content.video
+            val thumbnailFile = (videoContent as Video).thumbnail?.file
+            var thumbnailPath by remember { mutableStateOf<String?>(null) }
+            val caption = content.caption
+            val formattedText = content.caption
+
+            LaunchedEffect(formattedText) {
+                viewModel.loadCustomEmojis(formattedText)
+            }
+            // Собираем inlineContent для всех кастомных эмодзи
+            val inlineContent = remember(customEmojiMap, formattedText) {
+                val map = mutableMapOf<String, InlineTextContent>()
+                formattedText?.entities?.forEach { entity ->
+                    if (entity.type is TdApi.TextEntityTypeCustomEmoji) {
+                        val emojiId = (entity.type as TdApi.TextEntityTypeCustomEmoji).customEmojiId
+                        val path = customEmojiMap[emojiId]
+                        if (path != null) {
+                            map[emojiId.toString()] = InlineTextContent(
+                                Placeholder(24.sp, 24.sp, PlaceholderVerticalAlign.Center)
+                            ) {
+                                when {
+                                    path.endsWith(".tgs") -> {
+                                        val tgsJson = viewModel.decompressTgs(path)
+                                        val composition by rememberLottieComposition(LottieCompositionSpec.JsonString(tgsJson))
+                                        LottieAnimation(
+                                            composition = composition,
+                                            iterations = Int.MAX_VALUE,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    path.endsWith(".webp") -> {
+                                        AsyncImage(
+                                            model = path,
+                                            contentDescription = "Custom emoji",
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    path.endsWith(".webm") -> {
+                                        StickerPlayer(
+                                            path,
+                                            Modifier.size(24.dp)
+                                        )
+                                    }
+                                    else -> {
+                                        Spacer(modifier = Modifier.size(24.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                map
+            }
+
+            LaunchedEffect(thumbnailFile) {
+                if (thumbnailFile?.local?.isDownloadingCompleted == false) {
+                    viewModel.downloadFile(thumbnailFile)
+                } else {
+                    thumbnailPath = thumbnailFile?.local?.path
+                }
+            }
+
+            LaunchedEffect(downloadedFiles.values) {
+                val downloadedFile = downloadedFiles[thumbnailFile?.id]
+                if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                    thumbnailPath = downloadedFile.local?.path
+                }
+            }
+
+
+            Column {
+
+                if (caption.text != "" && content.showCaptionAboveMedia) {
+                    Text(
+                        modifier = Modifier.padding(16.dp),
+                        text = getAnnotatedString(formattedText),
+                        style = MaterialTheme.typography.bodyMedium,
+                        inlineContent = inlineContent
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .width(320.dp)
+                        .height(320.dp)
+                ) {
+                    AsyncImage(
+                        model = thumbnailPath,
+                        contentDescription = "Видео превью",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    IconButton(
+                        onClick = {
+                            onMediaClick(item.id)
+                        },
+                        modifier = Modifier.align(Alignment.Center)
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.baseline_play_arrow_24),
+                            contentDescription = "Запустить видео",
+                            modifier = Modifier.size(64.dp),
+                            tint = Color.White
+                        )
+                    }
+                }
+
+                if (caption.text != "" && !content.showCaptionAboveMedia) {
+                    Text(
+                        modifier = Modifier.padding(16.dp),
+                        text = getAnnotatedString(formattedText),
+                        style = MaterialTheme.typography.bodyMedium,
+                        inlineContent = inlineContent
+                    )
+                }
+
+            }
+        }
+        is MessageAnimation -> {
+            val animationInChat = content.animation.animation
+            var animationPath by remember { mutableStateOf<String?>("") }
+            val formattedText = content.caption
+
+            LaunchedEffect(formattedText) {
+                viewModel.loadCustomEmojis(formattedText)
+            }
+            // Собираем inlineContent для всех кастомных эмодзи
+            val inlineContent = remember(customEmojiMap, formattedText) {
+                val map = mutableMapOf<String, InlineTextContent>()
+                formattedText?.entities?.forEach { entity ->
+                    if (entity.type is TdApi.TextEntityTypeCustomEmoji) {
+                        val emojiId = (entity.type as TdApi.TextEntityTypeCustomEmoji).customEmojiId
+                        val path = customEmojiMap[emojiId]
+                        if (path != null) {
+                            map[emojiId.toString()] = InlineTextContent(
+                                Placeholder(24.sp, 24.sp, PlaceholderVerticalAlign.Center)
+                            ) {
+                                when {
+                                    path.endsWith(".tgs") -> {
+                                        val tgsJson = viewModel.decompressTgs(path)
+                                        val composition by rememberLottieComposition(LottieCompositionSpec.JsonString(tgsJson))
+                                        LottieAnimation(
+                                            composition = composition,
+                                            iterations = Int.MAX_VALUE,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    path.endsWith(".webp") -> {
+                                        AsyncImage(
+                                            model = path,
+                                            contentDescription = "Custom emoji",
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    path.endsWith(".webm") -> {
+                                        StickerPlayer(
+                                            path,
+                                            Modifier.size(24.dp)
+                                        )
+                                    }
+                                    else -> {
+                                        Spacer(modifier = Modifier.size(24.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                map
+            }
+
+            LaunchedEffect(animationInChat) {
+                if (animationInChat?.local?.isDownloadingCompleted == false) {
+                    viewModel.downloadFile(animationInChat)
+                } else {
+                    animationPath = animationInChat?.local?.path
+                }
+            }
+
+            LaunchedEffect(downloadedFiles.values) {
+                val downloadedFile = downloadedFiles[animationInChat?.id]
+                if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                    animationPath = downloadedFile.local?.path
+                }
+            }
+
+            val caption = content.caption
+
+            Column {
+                if (caption.text != "" && content.showCaptionAboveMedia) {
+                    Text(
+                        modifier = Modifier.padding(16.dp),
+                        text = getAnnotatedString(formattedText),
+                        style = MaterialTheme.typography.bodyMedium,
+                        inlineContent = inlineContent
+                    )
+                }
+                if(content.animation.mimeType == "image/gif") {
+                    AsyncImage(
+                        model = animationPath,
+                        contentDescription = "Анимация в сообщении",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .width(320.dp)
+                            .heightIn(max = 320.dp)
+                            .clickable {
+                                onMediaClick(item.id)
+                            }
+                    )
+                } else {
+                    AnimationPlayer(
+                        animationPath = animationPath,
+                        modifier = Modifier
+                            .widthIn(max = 320.dp)
+                            .heightIn(max = 320.dp)
+                    )
+                }
+                if (caption.text != "" && !content.showCaptionAboveMedia) {
+                    Text(
+                        modifier = Modifier.padding(16.dp),
+                        text = getAnnotatedString(formattedText),
+                        style = MaterialTheme.typography.bodyMedium,
+                        inlineContent = inlineContent
+                    )
+                }
+            }
+
+        }
+        is MessagePhoto -> {
+            val photoInChat = content.photo?.sizes?.lastOrNull()?.photo
+            var photoPath by remember { mutableStateOf<String?>("") }
+            val formattedText = content.caption
+
+            LaunchedEffect(formattedText) {
+                viewModel.loadCustomEmojis(formattedText)
+            }
+            // Собираем inlineContent для всех кастомных эмодзи
+            val inlineContent = remember(customEmojiMap, formattedText) {
+                val map = mutableMapOf<String, InlineTextContent>()
+                formattedText?.entities?.forEach { entity ->
+                    if (entity.type is TdApi.TextEntityTypeCustomEmoji) {
+                        val emojiId = (entity.type as TdApi.TextEntityTypeCustomEmoji).customEmojiId
+                        val path = customEmojiMap[emojiId]
+                        if (path != null) {
+                            map[emojiId.toString()] = InlineTextContent(
+                                Placeholder(24.sp, 24.sp, PlaceholderVerticalAlign.Center)
+                            ) {
+                                when {
+                                    path.endsWith(".tgs") -> {
+                                        val tgsJson = viewModel.decompressTgs(path)
+                                        val composition by rememberLottieComposition(LottieCompositionSpec.JsonString(tgsJson))
+                                        LottieAnimation(
+                                            composition = composition,
+                                            iterations = Int.MAX_VALUE,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    path.endsWith(".webp") -> {
+                                        AsyncImage(
+                                            model = path,
+                                            contentDescription = "Custom emoji",
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    path.endsWith(".webm") -> {
+                                        StickerPlayer(
+                                            path,
+                                            Modifier.size(24.dp)
+                                        )
+                                    }
+                                    else -> {
+                                        Spacer(modifier = Modifier.size(24.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                map
+            }
+
+            LaunchedEffect(photoInChat) {
+                if (photoInChat?.local?.isDownloadingCompleted == false) {
+                    viewModel.downloadFile(photoInChat)
+                } else {
+                    photoPath = photoInChat?.local?.path
+                }
+            }
+
+            LaunchedEffect(downloadedFiles.values) {
+                val downloadedFile = downloadedFiles[photoInChat?.id]
+                if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                    photoPath = downloadedFile.local?.path
+                }
+            }
+
+            val caption = content.caption
+
+            Column {
+                if (caption.text != "" && content.showCaptionAboveMedia) {
+                    Text(
+                        modifier = Modifier.padding(16.dp),
+                        text = getAnnotatedString(formattedText),
+                        style = MaterialTheme.typography.bodyMedium,
+                        inlineContent = inlineContent
+                    )
+                }
+                AsyncImage(
+                    model = photoPath,
+                    contentDescription = "Фото сообщения",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .width(320.dp)
+                        .heightIn(max = 320.dp)
+                        .clickable {
+                            onMediaClick(item.id)
+                        }
+                )
+                if (caption.text != "" && !content.showCaptionAboveMedia) {
+                    Text(
+                        modifier = Modifier.padding(16.dp),
+                        text = getAnnotatedString(formattedText),
+                        style = MaterialTheme.typography.bodyMedium,
+                        inlineContent = inlineContent
+                    )
+                }
+            }
+        }
+        is MessageDice -> {
+            val value = content.value
+
+            fun getStickersFromDiceStickers(diceStickers: TdApi.DiceStickers?): List<TdApi.Sticker> =
+                when (diceStickers) {
+                    is TdApi.DiceStickersRegular -> listOfNotNull(diceStickers.sticker)
+                    is TdApi.DiceStickersSlotMachine -> listOfNotNull(
+                        diceStickers.background,
+                        diceStickers.lever,
+                        diceStickers.leftReel,
+                        diceStickers.centerReel,
+                        diceStickers.rightReel
+                    )
+                    else -> emptyList()
+                }
+
+            val stickers = remember(value, content.initialState, content.finalState) {
+                when {
+                    value == 0 && content.initialState != null -> getStickersFromDiceStickers(content.initialState)
+                    value != 0 && content.finalState != null -> getStickersFromDiceStickers(content.finalState)
+                    else -> emptyList()
+                }
+            }
+
+            val stickerPaths = remember(stickers) { mutableStateListOf<String?>().apply { repeat(stickers.size) { add(null) } } }
+
+            LaunchedEffect(stickers) {
+                stickers.forEachIndexed { idx, sticker ->
+                    val localPath = sticker.sticker.local?.path
+                    if (sticker.sticker.local?.isDownloadingCompleted == false) {
+                        viewModel.downloadFile(sticker.sticker)
+                    }
+                    stickerPaths[idx] = localPath
+                }
+            }
+
+            val usedStickerIds = remember(stickers) { stickers.map { it.sticker.id } }
+            val usedDownloadedFiles = usedStickerIds.map { downloadedFiles[it] }
+            LaunchedEffect(usedDownloadedFiles) {
+                stickers.forEachIndexed { idx, sticker ->
+                    val downloadedFile = downloadedFiles[sticker.sticker.id]
+                    if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                        stickerPaths[idx] = downloadedFile.local?.path
+                    }
+                }
+            }
+
+            Box {
+                if (stickers.isNotEmpty() && stickerPaths.all { it != null }) {
+                    if (stickers.size == 1) {
+                        val path = stickerPaths.first()
+                        if (path != null && path.endsWith(".tgs")) {
+                            val tgsJson = remember(path) { viewModel.decompressTgs(path) }
+                            val composition by rememberLottieComposition(
+                                LottieCompositionSpec.JsonString(tgsJson)
+                            )
+                            LottieAnimation(
+                                composition = composition,
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .padding(16.dp)
+                                    .size(100.dp)
+                                    .clip(RoundedCornerShape(24.dp))
+                            )
+                        }
+                    } else {
+                        Box {
+                            stickerPaths.forEach { path ->
+                                if (path != null && path.endsWith(".tgs")) {
+                                    val tgsJson = remember(path) { viewModel.decompressTgs(path) }
+                                    val composition by rememberLottieComposition(
+                                        LottieCompositionSpec.JsonString(tgsJson)
+                                    )
+                                    LottieAnimation(
+                                        composition = composition,
+                                        modifier = Modifier
+                                            .align(Alignment.Center)
+                                            .padding(16.dp)
+                                            .size(100.dp)
+                                            .clip(RoundedCornerShape(24.dp))
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        is MessageDocument -> {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                val document = content.document.document
+                val downloadedSize = downloadedFiles[document.id]?.local?.downloadedSize ?: 0L
+                val downloadProgress = downloadedSize.toFloat() / document.expectedSize.toFloat()
+                val documentThumbnail = content.document.thumbnail?.file
+                var documentThumbnailPath by remember { mutableStateOf(documentThumbnail?.local?.path) }
+                val documentName = content.document?.fileName.toString()
+                val uploadedSize by remember { mutableStateOf<String?>(formatFileSize(document?.expectedSize?.toInt() ?: 0)) }
+                var isDownloading by remember { mutableStateOf(false) }
+                var isFileDownloaded by remember { mutableStateOf(false) }
+
+                LaunchedEffect(documentThumbnail) {
+                    if(documentThumbnail?.local?.isDownloadingCompleted == false) {
+                        viewModel.addFileToDownloads(documentThumbnail, chatId, messageId)
+                    } else {
+                        documentThumbnailPath = documentThumbnail?.local?.path
+                    }
+                }
+
+                LaunchedEffect(document) {
+                    if(document.local.isDownloadingCompleted) {
+                        isFileDownloaded = true
+                    }
+                }
+
+                LaunchedEffect(downloadedFiles.values) {
+                    val downloadedFile = downloadedFiles[documentThumbnail?.id]
+                    if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                        documentThumbnailPath = downloadedFile.local.path
+                    }
+                }
+
+
+                LaunchedEffect(downloadedFiles.values) {
+                    val downloadedFile = downloadedFiles[document?.id]
+                    if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                        isFileDownloaded = true
+                        isDownloading = false
+                    }
+                }
+
+                val context = LocalContext.current
+
+                val onDownloadClick: () -> Unit = {
+                    scope.launch {
+                        if (!isFileDownloaded) {
+                            isDownloading = true
+                            viewModel.addFileToDownloads(document, chatId, messageId)
+                        } else {
+                            val mimeType = getMimeType(documentName)
+                            val filePath = document.local.path
+
+                            if (viewModel.isApkFile(filePath)) {
+                                val canInstall = context.packageManager.canRequestPackageInstalls()
+                                if (!canInstall) {
+                                    val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                                        data = Uri.parse("package:${context.packageName}")
+                                    }
+                                    context.startActivity(intent) // Открываем настройки для разрешения
+                                    return@launch
+                                }
+                                viewModel.installApk(context, filePath)
+                            } else {
+                                val fileUri = FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.provider",
+                                    File(filePath)
+                                )
+
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(fileUri, mimeType)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+
+                                try {
+                                    context.startActivity(intent)
+                                } catch (e: ActivityNotFoundException) {
+                                    Toast.makeText(context, "Нет приложения для открытия файла", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    }
+                }
+
+
+                // Отображение в зависимости от состояния файла
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .clickable { onDownloadClick() }, // Клик для загрузки
+                    contentAlignment = Alignment.Center
+                ) {
+                    when {
+                        isDownloading -> {
+                            CircularProgressIndicator(
+                                progress = { downloadProgress },
+                                modifier = Modifier.size(40.dp),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            IconButton (
+                                onClick = {
+                                    scope.launch {
+                                        viewModel.cancelFileDownload(content.document.document)
+                                        isDownloading = false
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    painterResource(R.drawable.baseline_close_24),
+                                    "Отменить"
+                                )
+                            }
+                        }
+
+                        isFileDownloaded -> {
+                            if (documentThumbnailPath != null) {
+                                AsyncImage(
+                                    model = documentThumbnailPath,
+                                    contentDescription = "Документ",
+                                    modifier = Modifier
+                                        .size(80.dp)
+                                        .clip(
+                                            RoundedCornerShape(
+                                                16.dp
+                                            )
+                                        )
+                                        .clickable { onDownloadClick() }, // Клик для повторной загрузки
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Icon(
+                                    painter = painterResource(R.drawable.baseline_insert_drive_file_24),
+                                    contentDescription = "Документ",
+                                    modifier = Modifier.size(40.dp),
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+
+                        else -> {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_download),
+                                contentDescription = "Скачать документ",
+                                modifier = Modifier.size(40.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column {
+                    Text(
+                        text = documentName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row {
+                        if (isDownloading) {
+                            Text(
+                                text = formatFileSize(downloadedSize.toInt()) + " / ",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                        if (uploadedSize != null) {
+                            Text(
+                                text = uploadedSize!!,
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        is MessageAnimatedEmoji -> {
+            val animatedEmoji = content.animatedEmoji
+            val stickerFile = animatedEmoji.sticker?.sticker
+            var stickerPath by remember { mutableStateOf<String?>(null) }
+
+            LaunchedEffect(stickerFile) {
+                if (stickerFile?.local?.isDownloadingCompleted == false) {
+                    viewModel.downloadFile(stickerFile)
+                } else {
+                    stickerPath = stickerFile?.local?.path
+                }
+            }
+
+            LaunchedEffect(downloadedFiles.values) {
+                val downloadedFile = downloadedFiles[stickerFile?.id]
+                if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                    stickerPath = downloadedFile.local?.path
+                }
+            }
+
+            if (stickerPath != null) {
+                when (animatedEmoji.sticker?.format) {
+                    is TdApi.StickerFormatTgs -> {
+                        val tgsJson = viewModel.decompressTgs(stickerPath!!)
+                        val composition by rememberLottieComposition(LottieCompositionSpec.JsonString(tgsJson))
+
+                        LottieAnimation(
+                            composition = composition,
+                            iterations = Int.MAX_VALUE,
+                            modifier = Modifier
+                                .padding(16.dp)
+                                .size(100.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                        )
+                    }
+                    is TdApi.StickerFormatWebp -> {
+                        AsyncImage(
+                            model = stickerPath,
+                            contentDescription = "Стикер",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .padding(16.dp)
+                                .size(100.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                        )
+                    }
+                    is TdApi.StickerFormatWebm -> {
+                        StickerPlayer(
+                            stickerPath!!,
+                            Modifier
+                                .padding(16.dp)
+                                .size(100.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                        )
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+        is MessageSticker -> {
+            val sticker = content.sticker
+            val stickerFile = sticker?.sticker
+            var stickerPath by remember { mutableStateOf<String?>(null) }
+
+            LaunchedEffect (stickerFile) {
+                if (stickerFile?.local?.isDownloadingCompleted == false) {
+                    viewModel.addFileToDownloads(stickerFile, chatId, messageId)
+                } else {
+                    stickerPath = stickerFile?.local?.path
+                }
+            }
+
+            LaunchedEffect(downloadedFiles.values) {
+                val downloadedFile = downloadedFiles[stickerFile?.id]
+                if (downloadedFile?.local?.isDownloadingCompleted == true) {
+                    stickerPath = downloadedFile.local?.path
+                }
+            }
+
+            if (stickerPath != null) {
+                when(sticker.format) {
+                    is TdApi.StickerFormatWebp -> {
+                        AsyncImage(
+                            model = stickerPath,
+                            contentDescription = "Стикер",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .size(200.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                        )
+                    }
+                    is TdApi.StickerFormatWebm -> {
+                        StickerPlayer(
+                            stickerPath!!,
+                            Modifier
+                                .size(200.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                        )
+                    }
+                    is TdApi.StickerFormatTgs -> {
+                        val tgsJson = viewModel.decompressTgs(stickerPath!!)
+                        val composition by rememberLottieComposition(LottieCompositionSpec.JsonString(tgsJson))
+
+                        LottieAnimation(
+                            composition = composition,
+                            iterations = Int.MAX_VALUE,
+                            modifier = Modifier
+                                .size(200.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                        )
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(200.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .align(Alignment.Center),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+        is MessageVoiceNote -> {
+            var isListened by remember { mutableStateOf(false) }
+
+            LaunchedEffect(isVoicePlaying) {
+                isListened = content.isListened
+            }
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .clickable { onTogglePlay(messageId, content, chatId) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(
+                            id = if (idMessageOfVoiceNote == messageId && isVoicePlaying)
+                                R.drawable.baseline_pause_24
+                            else
+                                R.drawable.baseline_play_arrow_24
+                        ),
+                        contentDescription = "Play/Pause",
+                        tint = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surface),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AnimatedVoiceIndicator(isPlaying = idMessageOfVoiceNote == messageId && isVoicePlaying)
+                }
+
+                val seconds = content.voiceNote.duration
+                Text(
+                    text = formatDuration(seconds),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                // Используем состояние из актуального сообщения
+                if (!isListened) {
+                    Box(
+                        Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary)
+                    )
+                }
+            }
+
+        }
+        else -> {
+            Text(
+                modifier = Modifier.padding(16.dp),
+                text = stringResource(R.string.unsupportedMessage),
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
+}
 
 
 @Composable
@@ -255,23 +1178,75 @@ fun MediaCarousel(
                 }
             }
         }
+        val customEmojiMap by viewModel.customEmojiMapFlow.collectAsState() // customEmojiId -> path
 
         // Caption and page indicators
-        val firstMessageCaption = album.messages.firstNotNullOfOrNull { message ->
+        val formattedText = album.messages.firstNotNullOfOrNull { message ->
             when (val content = message.content) {
-                is MessagePhoto -> content.caption.text.takeIf { !it.isNullOrEmpty() }
-                is MessageVideo -> content.caption.text.takeIf { !it.isNullOrEmpty() }
+                is MessagePhoto -> content.caption.takeIf { !it.text.isNullOrEmpty() }
+                is MessageVideo -> content.caption.takeIf { !it.text.isNullOrEmpty() }
                 else -> null
             }
         }
 
+        LaunchedEffect(formattedText) {
+            if (formattedText != null) {
+                viewModel.loadCustomEmojis(formattedText)
+            }
+        }
+        // Собираем inlineContent для всех кастомных эмодзи
+        val inlineContent = remember(customEmojiMap, formattedText) {
+            val map = mutableMapOf<String, InlineTextContent>()
+            formattedText?.entities?.forEach { entity ->
+                if (entity.type is TdApi.TextEntityTypeCustomEmoji) {
+                    val emojiId = (entity.type as TdApi.TextEntityTypeCustomEmoji).customEmojiId
+                    val path = customEmojiMap[emojiId]
+                    if (path != null) {
+                        map[emojiId.toString()] = InlineTextContent(
+                            Placeholder(24.sp, 24.sp, PlaceholderVerticalAlign.Center)
+                        ) {
+                            when {
+                                path.endsWith(".tgs") -> {
+                                    val tgsJson = viewModel.decompressTgs(path)
+                                    val composition by rememberLottieComposition(LottieCompositionSpec.JsonString(tgsJson))
+                                    LottieAnimation(
+                                        composition = composition,
+                                        iterations = Int.MAX_VALUE,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                                path.endsWith(".webp") -> {
+                                    AsyncImage(
+                                        model = path,
+                                        contentDescription = "Custom emoji",
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                                path.endsWith(".webm") -> {
+                                    StickerPlayer(
+                                        path,
+                                        Modifier.size(24.dp)
+                                    )
+                                }
+                                else -> {
+                                    Spacer(modifier = Modifier.size(24.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            map
+        }
 
 
-        if (!firstMessageCaption.isNullOrEmpty()) {
+
+        if (formattedText != null) {
             Text(
-                text = firstMessageCaption,
+                text = getAnnotatedString(formattedText),
                 modifier = Modifier.padding(horizontal = 16.dp),
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyMedium,
+                inlineContent = inlineContent
             )
             Spacer(modifier = Modifier.height(16.dp))
         }
@@ -429,138 +1404,124 @@ fun DraggableBox(
 @Composable
 fun getAnnotatedString(formattedText: TdApi.FormattedText?): AnnotatedString {
     return buildAnnotatedString {
-        if (formattedText != null) {
-            formattedText.entities.forEach { entity ->
-                val start = entity.offset
-                val end = entity.offset + entity.length
-                val range = start until end
-                when (entity.type) {
-                    is TdApi.TextEntityTypeTextUrl -> {
-                        addStyle(
-                            SpanStyle(
-                                color = MaterialTheme.colorScheme.primary
-                            ),
-                            start, end
-                        )
-                        addLink(
-                            url = LinkAnnotation.Url((entity.type as TdApi.TextEntityTypeTextUrl).url),
-                            start = start,
-                            end = end
-                        )
-                    }
+        val text = formattedText?.text ?: ""
+        val entities = formattedText?.entities ?: emptyArray()
+        var lastIndex = 0
 
-                    is TdApi.TextEntityTypeUrl -> {
-                        val url =
-                            formattedText.text.substring(
-                                start,
-                                end
-                            )
-                        addStyle(
-                            SpanStyle(
-                                color = MaterialTheme.colorScheme.primary,
-                                textDecoration = TextDecoration.Underline
-                            ),
-                            start, end
-                        )
-                        addLink(
-                            url = LinkAnnotation.Url(url),
-                            start = start,
-                            end = end
-                        )
-                    }
+        for (entity in entities) {
+            val start = entity.offset
+            val end = start + entity.length
 
-                    is TdApi.TextEntityTypeSpoiler -> {
-                        addStyle(
-                            SpanStyle(
-                                background = MaterialTheme.colorScheme.onSurface,
-                                color = MaterialTheme.colorScheme.onSurface
-                            ),
-                            start, end
-                        )
-                    }
+            // Добавляем обычный текст между entity
+            if (lastIndex < start) {
+                append(text.substring(lastIndex, start))
+            }
 
-                    is TdApi.TextEntityTypeBold -> {
-                        addStyle(
-                            SpanStyle(fontWeight = FontWeight.Bold),
-                            start, end
-                        )
-                    }
-
-                    is TdApi.TextEntityTypeItalic -> {
-                        addStyle(
-                            SpanStyle(fontStyle = FontStyle.Italic),
-                            start, end
-                        )
-                    }
-
-                    is TdApi.TextEntityTypeCode -> {
-                        addStyle(
-                            SpanStyle(
-                                fontFamily = FontFamily.Monospace,
-                            ),
-                            start, end
-                        )
-                    }
-
-                    is TdApi.TextEntityTypePreCode -> {
-                        addStyle(
-                            SpanStyle(
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            start, end
-                        )
-                    }
-
-                    is TdApi.TextEntityTypeMention -> {
-                        addStyle(
-                            SpanStyle(color = MaterialTheme.colorScheme.primary),
-                            start, end
-                        )
-                    }
-
-                    is TdApi.TextEntityTypeHashtag -> {
-                        addStyle(
-                            SpanStyle(color = MaterialTheme.colorScheme.primary),
-                            start, end
-                        )
-                    }
-
-                    is TdApi.TextEntityTypeUnderline -> {
-                        addStyle(
-                            SpanStyle(textDecoration = TextDecoration.Underline),
-                            start, end
-                        )
-                    }
-
-                    is TdApi.TextEntityTypeStrikethrough -> {
-                        addStyle(
-                            SpanStyle(textDecoration = TextDecoration.LineThrough),
-                            start, end
-                        )
-                    }
-
-                    is TdApi.TextEntityTypeBlockQuote -> {
-                        addStyle(
-                            SpanStyle(
-                                fontStyle = FontStyle.Italic
-                            ),
-                            start, end
-                        )
-                    }
-
-                    is TdApi.TextEntityTypePre -> {
-                        addStyle(
-                            SpanStyle(
-                                fontFamily = FontFamily.Monospace
-                            ),
-                            start, end
-                        )
+            val entityText = text.substring(start, end)
+            when (val type = entity.type) {
+                is TdApi.TextEntityTypeMention,
+                is TdApi.TextEntityTypeHashtag,
+                is TdApi.TextEntityTypeCashtag,
+                is TdApi.TextEntityTypeBotCommand,
+                is TdApi.TextEntityTypeEmailAddress,
+                is TdApi.TextEntityTypePhoneNumber,
+                is TdApi.TextEntityTypeBankCardNumber,
+                is TdApi.TextEntityTypeMentionName -> {
+                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                        append(entityText)
                     }
                 }
+                is TdApi.TextEntityTypeUrl -> {
+                    withStyle(
+                        SpanStyle(
+                            color = MaterialTheme.colorScheme.primary,
+                            textDecoration = TextDecoration.Underline
+                        )
+                    ) {
+                        append(entityText)
+                    }
+                    addLink(
+                        url = LinkAnnotation.Url(entityText),
+                        start = start,
+                        end = end
+                    )
+                }
+                is TdApi.TextEntityTypeTextUrl -> {
+                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                        append(entityText)
+                    }
+                    addLink(
+                        url = LinkAnnotation.Url(type.url),
+                        start = start,
+                        end = end
+                    )
+                }
+                is TdApi.TextEntityTypeBold -> {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                        append(entityText)
+                    }
+                }
+                is TdApi.TextEntityTypeItalic -> {
+                    withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                        append(entityText)
+                    }
+                }
+                is TdApi.TextEntityTypeUnderline -> {
+                    withStyle(SpanStyle(textDecoration = TextDecoration.Underline)) {
+                        append(entityText)
+                    }
+                }
+                is TdApi.TextEntityTypeStrikethrough -> {
+                    withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) {
+                        append(entityText)
+                    }
+                }
+                is TdApi.TextEntityTypeSpoiler -> {
+                    withStyle(
+                        SpanStyle(
+                            background = MaterialTheme.colorScheme.onSurface,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    ) {
+                        append(entityText)
+                    }
+                }
+                is TdApi.TextEntityTypeCode,
+                is TdApi.TextEntityTypePre,
+                is TdApi.TextEntityTypePreCode -> {
+                    withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) {
+                        append(entityText)
+                    }
+                }
+                is TdApi.TextEntityTypeBlockQuote,
+                is TdApi.TextEntityTypeExpandableBlockQuote -> {
+                    withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                        append(entityText)
+                    }
+                }
+                is TdApi.TextEntityTypeCustomEmoji -> {
+                    appendInlineContent(type.customEmojiId.toString())
+                }
+                is TdApi.TextEntityTypeMediaTimestamp -> {
+                    withStyle(
+                        SpanStyle(
+                            color = MaterialTheme.colorScheme.secondary,
+                            textDecoration = TextDecoration.Underline
+                        )
+                    ) {
+                        append(entityText)
+                    }
+                }
+                else -> {
+                    append(entityText)
+                }
             }
+            lastIndex = end
         }
-        if (formattedText != null) {
-            append(formattedText.text)
+
+        // Добавляем оставшийся текст после последнего entity
+        if (lastIndex < text.length) {
+            append(text.substring(lastIndex))
         }
     }
 }
