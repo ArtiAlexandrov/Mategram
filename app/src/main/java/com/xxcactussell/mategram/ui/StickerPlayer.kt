@@ -112,6 +112,6 @@ fun StickerPlayer(
             }
             webView
         },
-        modifier = modifier
+        modifier = modifier,
     )
 }

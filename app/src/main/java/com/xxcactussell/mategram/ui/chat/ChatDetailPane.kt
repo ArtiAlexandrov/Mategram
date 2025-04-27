@@ -2,13 +2,10 @@ package com.xxcactussell.mategram.ui.chat
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.content.ActivityNotFoundException
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
 import android.net.Uri
-import android.provider.Settings
 import android.util.Log
 import android.view.Window
 import android.view.WindowInsets
@@ -43,7 +40,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -63,6 +59,7 @@ import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -77,7 +74,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -91,44 +87,38 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventTimeoutCancellationException
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
-import com.airbnb.lottie.compose.LottieAnimation
-import com.airbnb.lottie.compose.LottieCompositionSpec
-import com.airbnb.lottie.compose.rememberLottieComposition
 import com.xxcactussell.mategram.MainViewModel
 import com.xxcactussell.mategram.R
 import com.xxcactussell.mategram.formatCompactNumber
-import com.xxcactussell.mategram.getMimeType
 import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
 import com.xxcactussell.mategram.kotlinx.telegram.core.convertUnixTimestampToDate
 import com.xxcactussell.mategram.kotlinx.telegram.core.convertUnixTimestampToDateByDay
-import com.xxcactussell.mategram.kotlinx.telegram.core.formatFileSize
 import com.xxcactussell.mategram.kotlinx.telegram.core.getDayFromDate
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getBasicGroup
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getChat
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getMessage
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getSupergroup
 import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
+import com.xxcactussell.mategram.restoreChatState
+import com.xxcactussell.mategram.updateChatClientData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import org.drinkless.tdlib.TdApi
 import org.drinkless.tdlib.TdApi.BasicGroup
@@ -150,18 +140,10 @@ import org.drinkless.tdlib.TdApi.ChatActionWatchingAnimations
 import org.drinkless.tdlib.TdApi.ChatTypeBasicGroup
 import org.drinkless.tdlib.TdApi.ChatTypePrivate
 import org.drinkless.tdlib.TdApi.ChatTypeSupergroup
-import org.drinkless.tdlib.TdApi.MessageAnimatedEmoji
-import org.drinkless.tdlib.TdApi.MessageAnimation
-import org.drinkless.tdlib.TdApi.MessageDice
-import org.drinkless.tdlib.TdApi.MessageDocument
 import org.drinkless.tdlib.TdApi.MessageOriginChannel
 import org.drinkless.tdlib.TdApi.MessageOriginChat
 import org.drinkless.tdlib.TdApi.MessageOriginUser
-import org.drinkless.tdlib.TdApi.MessagePhoto
 import org.drinkless.tdlib.TdApi.MessageReplyToMessage
-import org.drinkless.tdlib.TdApi.MessageSticker
-import org.drinkless.tdlib.TdApi.MessageText
-import org.drinkless.tdlib.TdApi.MessageVideo
 import org.drinkless.tdlib.TdApi.MessageVoiceNote
 import org.drinkless.tdlib.TdApi.Supergroup
 import org.drinkless.tdlib.TdApi.User
@@ -170,7 +152,6 @@ import org.drinkless.tdlib.TdApi.UserStatusLastWeek
 import org.drinkless.tdlib.TdApi.UserStatusOffline
 import org.drinkless.tdlib.TdApi.UserStatusOnline
 import org.drinkless.tdlib.TdApi.UserTypeBot
-import org.drinkless.tdlib.TdApi.Video
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -311,14 +292,22 @@ fun ChatDetailPane(
         }
     }
 
-
-
-// Прокрутка к первому непрочитанному сообщению при первой загрузке чата
     LaunchedEffect(chat) {
-        val unreadIndex = chat.unreadCount
-        if (unreadIndex > 0 && unreadIndex < messagesForChat.size) {
-            listState.animateScrollToItem(unreadIndex - 1)
+        restoreChatState(chat)?.let { state ->
+            // Прокручиваем к сохранённой позиции
+            listState.scrollToItem(state.scrollPosition)
+            // Возможно, вы захотите сделать дополнительную логику по выделению сообщения с id lastReadMessageId
         }
+    }
+
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { newIndex ->
+                // В данном примере используем chat.lastReadInboxMessageId как последний просмотренный.
+                // При необходимости можно вычислять его иначе.
+                updateChatClientData(chat, newIndex, chat.lastReadInboxMessageId)
+            }
     }
 
     // Отслеживание видимых сообщений и отметка их как прочитанных
@@ -461,7 +450,7 @@ fun ChatDetailPane(
                     var senderAvatarPath by remember { mutableStateOf<String?>(null) }
                     var showAuthor by remember { mutableStateOf(false) }
                     var showPlaceholder by remember { mutableStateOf(false) }
-
+                    var spaceBetweenMessage = 4.dp
 
 
                     fun shouldShowAuthorInfo(): Boolean {
@@ -501,6 +490,10 @@ fun ChatDetailPane(
                                 }
                             }
                         }
+                    }
+
+                    if (shouldShowAuthorInfo() || (nextMessage != null && message.date - nextMessage.date > 120)) {
+                        spaceBetweenMessage = 16.dp
                     }
 
                     LaunchedEffect(message) {
@@ -546,7 +539,7 @@ fun ChatDetailPane(
                             DraggableBox(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(16.dp, 0.dp, 16.dp, 8.dp),
+                                    .padding(16.dp, spaceBetweenMessage, 16.dp, 0.dp),
                                 onDragComplete = {
                                     inputMessageToReply = TdApi.InputMessageReplyToMessage(message.id, null)
                                     messageIdToReply = message.id
@@ -611,9 +604,9 @@ fun ChatDetailPane(
                                             shape = RoundedCornerShape(24.dp),
                                             colors = CardDefaults.cardColors(
                                                 containerColor = if (!message.isOutgoing)
-                                                    MaterialTheme.colorScheme.inversePrimary
+                                                    MaterialTheme.colorScheme.surfaceContainer
                                                 else
-                                                    MaterialTheme.colorScheme.surfaceVariant
+                                                    MaterialTheme.colorScheme.secondaryContainer
                                             )
                                         ) {
                                             if (showAuthor) {
@@ -647,7 +640,7 @@ fun ChatDetailPane(
                                                         .height(32.dp),
                                                     shape = RoundedCornerShape(16.dp),
                                                     colors = CardDefaults.cardColors(
-                                                        containerColor = MaterialTheme.colorScheme.surfaceContainer
+                                                        containerColor = MaterialTheme.colorScheme.inversePrimary
                                                     )
                                                 ) {
                                                     Row(
@@ -733,7 +726,7 @@ fun ChatDetailPane(
                                                         },
                                                     shape = RoundedCornerShape(16.dp),
                                                     colors = CardDefaults.cardColors(
-                                                        containerColor = MaterialTheme.colorScheme.surfaceContainer
+                                                        containerColor = MaterialTheme.colorScheme.inversePrimary
                                                     )
                                                 ) {
                                                     RepliedMessage(
@@ -767,7 +760,7 @@ fun ChatDetailPane(
                         DraggableBox(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp, 0.dp, 16.dp, 8.dp),
+                                .padding(16.dp, spaceBetweenMessage, 16.dp, 0.dp),
                             onDragComplete = {
                                 inputMessageToReply = TdApi.InputMessageReplyToMessage(message.id, null)
                                 messageIdToReply = message.id
@@ -829,16 +822,16 @@ fun ChatDetailPane(
                                         shape = RoundedCornerShape(24.dp),
                                         colors = CardDefaults.cardColors(
                                             containerColor = if (!message.isOutgoing)
-                                                MaterialTheme.colorScheme.inversePrimary
+                                                MaterialTheme.colorScheme.surfaceContainer
                                             else
-                                                MaterialTheme.colorScheme.surfaceVariant
+                                                MaterialTheme.colorScheme.secondaryContainer
                                         )
                                     ) {
                                         if (showAuthor) {
                                             Card(
                                                 modifier = Modifier.padding(8.dp, 8.dp, 8.dp, 0.dp),
                                                 colors = CardDefaults.cardColors(
-                                                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                                                    containerColor = MaterialTheme.colorScheme.inversePrimary
                                                 )
                                             ) {
                                                 Text(
@@ -856,7 +849,7 @@ fun ChatDetailPane(
                                                     .height(32.dp),
                                                 shape = RoundedCornerShape(16.dp),
                                                 colors = CardDefaults.cardColors(
-                                                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                                                    containerColor = MaterialTheme.colorScheme.inversePrimary
                                                 )
                                             ) {
                                                 Row(
@@ -942,7 +935,7 @@ fun ChatDetailPane(
                                                     },
                                                 shape = RoundedCornerShape(16.dp),
                                                 colors = CardDefaults.cardColors(
-                                                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                                                    containerColor = MaterialTheme.colorScheme.inversePrimary
                                                 )
                                             ) {
                                                 RepliedMessage(
@@ -963,8 +956,7 @@ fun ChatDetailPane(
                                             onTogglePlay = { msgId, content, chatId ->
                                                 onTogglePlay(msgId, content, chatId)
                                             },
-                                            item = message,
-                                            downloadedFiles = downloadedFiles
+                                            item = message
                                         )
                                     }
                                     if (isDateShown) {
@@ -1773,7 +1765,8 @@ fun ChatTopBar(
         title = {
             Column {
                 Row(
-                    modifier = Modifier.clickable { onShowInfo() }
+                    modifier = Modifier.clickable { onShowInfo() },
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (avatarPath != null) {
                         AsyncImage(
@@ -1786,7 +1779,7 @@ fun ChatTopBar(
                     } else {
                         Box(
                             modifier = Modifier
-                                .size(48.dp)
+                                .size(36.dp)
                                 .clip(CircleShape)
                                 .background(MaterialTheme.colorScheme.primary)
                         ) {
@@ -1799,7 +1792,7 @@ fun ChatTopBar(
                         }
                     }
                     Spacer(modifier = Modifier.size(8.dp))
-                    Column {
+                    Column (Modifier.weight(1f)) {
                         Text(
                             text = chat?.title ?: "Безымянный чат",
                             maxLines = 1,
@@ -1812,11 +1805,26 @@ fun ChatTopBar(
                             )
                         }
                     }
+                    Spacer(modifier = Modifier.size(8.dp))
+                    IconButton(
+                        onClick = {},
+                        colors = IconButtonDefaults.iconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest)
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.baseline_dots), "menu"
+                        )
+                    }
                 }
             }
         },
         navigationIcon = {
-            IconButton(onClick = { onBackClick(listState.firstVisibleItemIndex) }) {
+            IconButton(
+                onClick = { onBackClick(listState.firstVisibleItemIndex) },
+                colors = IconButtonDefaults.iconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                )
+            ) {
                 Icon(
                     painterResource(R.drawable.baseline_arrow_back_24),
                     contentDescription = null
@@ -1827,7 +1835,7 @@ fun ChatTopBar(
 }
 
 @Composable
-private fun ChatStatusText(
+fun ChatStatusText(
     status: String,
 ) {
     val isTyping = status.endsWith("...")

@@ -259,7 +259,7 @@ fun ChatListView(
 
     NavigableListDetailPaneScaffold(
         modifier = Modifier
-            .background(MaterialTheme.colorScheme.background)
+            .background(MaterialTheme.colorScheme.surface)
             .windowInsetsPadding(WindowInsets.ime),
         listPane = {
             AnimatedPane (

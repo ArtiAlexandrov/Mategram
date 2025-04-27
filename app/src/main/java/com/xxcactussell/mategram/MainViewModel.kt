@@ -219,12 +219,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         observeAuthorizationState()
-
-        chatUpdatesScope.launch {
-            repository.chatFoldersUpdateFlow.collect { update ->
-                handleChatFoldersUpdate(update)
-            }
-        }
     }
 
     private fun observeAuthorizationState() {
@@ -286,6 +280,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun observeAllChatUpdates() {
         chatUpdatesScope.launch {
             launch {
+                repository.chatFoldersUpdateFlow.collect { update ->
+                    handleChatFoldersUpdate(update)
+                }
+            }
+            launch {
                 repository.newChatFlowUpdate.collect { chat ->
                     handleNewChatUpdate(chat)
                 }
@@ -325,6 +324,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     handleUserChatActionUpdate(update)
                 }
             }
+
         }
     }
 

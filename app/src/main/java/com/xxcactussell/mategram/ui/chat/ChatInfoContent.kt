@@ -20,6 +20,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -46,8 +47,39 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.xxcactussell.mategram.MainViewModel
 import com.xxcactussell.mategram.R
+import com.xxcactussell.mategram.formatCompactNumber
+import com.xxcactussell.mategram.kotlinx.telegram.core.TelegramRepository.api
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getBasicGroup
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getSupergroup
+import com.xxcactussell.mategram.kotlinx.telegram.coroutines.getUser
 import org.drinkless.tdlib.TdApi
+import org.drinkless.tdlib.TdApi.BasicGroup
+import org.drinkless.tdlib.TdApi.ChatActionCancel
+import org.drinkless.tdlib.TdApi.ChatActionChoosingContact
+import org.drinkless.tdlib.TdApi.ChatActionChoosingLocation
+import org.drinkless.tdlib.TdApi.ChatActionChoosingSticker
+import org.drinkless.tdlib.TdApi.ChatActionRecordingVideo
+import org.drinkless.tdlib.TdApi.ChatActionRecordingVideoNote
+import org.drinkless.tdlib.TdApi.ChatActionRecordingVoiceNote
+import org.drinkless.tdlib.TdApi.ChatActionStartPlayingGame
+import org.drinkless.tdlib.TdApi.ChatActionTyping
+import org.drinkless.tdlib.TdApi.ChatActionUploadingDocument
+import org.drinkless.tdlib.TdApi.ChatActionUploadingPhoto
+import org.drinkless.tdlib.TdApi.ChatActionUploadingVideo
+import org.drinkless.tdlib.TdApi.ChatActionUploadingVideoNote
+import org.drinkless.tdlib.TdApi.ChatActionUploadingVoiceNote
+import org.drinkless.tdlib.TdApi.ChatActionWatchingAnimations
+import org.drinkless.tdlib.TdApi.ChatTypeBasicGroup
+import org.drinkless.tdlib.TdApi.ChatTypePrivate
+import org.drinkless.tdlib.TdApi.ChatTypeSupergroup
+import org.drinkless.tdlib.TdApi.Supergroup
+import org.drinkless.tdlib.TdApi.User
 import org.drinkless.tdlib.TdApi.UserFullInfo
+import org.drinkless.tdlib.TdApi.UserStatusLastMonth
+import org.drinkless.tdlib.TdApi.UserStatusLastWeek
+import org.drinkless.tdlib.TdApi.UserStatusOffline
+import org.drinkless.tdlib.TdApi.UserStatusOnline
+import org.drinkless.tdlib.TdApi.UserTypeBot
 
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @Composable
@@ -73,6 +105,75 @@ fun ChatInfoContent(
 
     val membersOfGroup by viewModel.membersOfGroup.collectAsState()
     val membersOfSuperGroup by viewModel.membersOfSuperGroup.collectAsState()
+
+    val userStatuses by viewModel.userStatuses.collectAsState()
+    var statusText by remember { mutableStateOf("") }
+
+    var user by remember { mutableStateOf<Any?>(null) }
+
+    LaunchedEffect(chat) {
+        user =
+            when (val type = chat.type) {
+                is ChatTypePrivate -> api.getUser(type.userId)
+                is ChatTypeSupergroup -> api.getSupergroup(type.supergroupId)
+                is ChatTypeBasicGroup -> api.getBasicGroup(type.basicGroupId)
+                else -> null
+            }
+        when (chat.type) {
+            is ChatTypePrivate -> {
+                viewModel.updateCurrentStatus((chat.type as ChatTypePrivate).userId)
+            }
+            is ChatTypeBasicGroup -> {
+                statusText = "${formatCompactNumber((user as BasicGroup).memberCount)} участников"
+            }
+            is ChatTypeSupergroup -> {
+                statusText = if ((chat.type as ChatTypeSupergroup).isChannel) {
+                    "${formatCompactNumber((user as Supergroup).memberCount)} подписчиков"
+                } else {
+                    "${formatCompactNumber((user as Supergroup).memberCount)} участников"
+                }
+            }
+        }
+    }
+    LaunchedEffect(userStatuses.values) {
+        if (chat.type is ChatTypePrivate && user != null) {
+            when (userStatuses[chat.id]?.action) {
+                is ChatActionCancel, null -> {
+                    statusText = if ((user as User).type is UserTypeBot) {
+                        "${formatCompactNumber(((user as User).type as UserTypeBot).activeUserCount)} пользователей в месяц"
+                    } else {
+                        when (val status = userStatuses[chat.id]?.status) {
+                            is UserStatusOnline -> "Онлайн"
+                            is UserStatusOffline -> {
+                                viewModel.formatLastSeenTime(status.wasOnline)
+                            }
+
+                            is UserStatusLastWeek -> "Был(-а) на этой неделе..."
+                            is UserStatusLastMonth -> "Был(-а) в этом месяце..."
+                            else -> "Был(-а) недавно"
+                        }
+                    }
+                }
+                is ChatActionTyping -> { statusText = "Печатает..." }
+                is ChatActionRecordingVideo -> { statusText = "Записывает видео..." }
+                is ChatActionUploadingVideo -> { statusText = "Загружает видео..." }
+                is ChatActionRecordingVoiceNote -> { statusText = "Записывает аудиосообщение..." }
+                is ChatActionUploadingVoiceNote -> { statusText = "Загружает аудиосообщение..." }
+                is ChatActionUploadingPhoto -> { statusText = "Загружает фото..." }
+                is ChatActionUploadingDocument -> { statusText = "Загружает документ..." }
+                is ChatActionChoosingSticker -> { statusText = "Выбирает стикер..." }
+                is ChatActionChoosingLocation -> { statusText = "Выбирает локацию..." }
+                is ChatActionChoosingContact -> { statusText = "Выбирает контакт..." }
+                is ChatActionStartPlayingGame -> { statusText = "Играет в игру..." }
+                is ChatActionRecordingVideoNote -> { statusText = "Записывает видеосообщение..." }
+                is ChatActionUploadingVideoNote -> { statusText = "Загружает видеосообщение..." }
+                is ChatActionWatchingAnimations -> { statusText = "Смотрит анимацию..." }
+
+            }
+        }
+    }
+
+
 
     // --- Request Full Info ---
     LaunchedEffect(chat.id, chat.type) {
@@ -134,12 +235,11 @@ fun ChatInfoContent(
         LazyColumn(
             modifier = modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
         ) {
             item {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth().padding(0.dp, 0.dp, 0.dp, 4.dp),
+                        .fillMaxWidth().padding(16.dp, 0.dp, 16.dp, 4.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     if (chat.type is TdApi.ChatTypePrivate && userProfilePhotos.isNotEmpty()) {
@@ -159,10 +259,29 @@ fun ChatInfoContent(
                 }
             }
             item {
-                Text(
-                    text = chat.title,
-                    style = MaterialTheme.typography.headlineMedium,
-                    modifier = Modifier.padding(vertical = 4.dp)
+                ListItem(
+                    colors = ListItemDefaults.colors(
+                        containerColor = Color.Transparent
+                    ),
+                    headlineContent = {
+                        Text(
+                            text = chat.title,
+                            style = MaterialTheme.typography.headlineMedium,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    },
+                    supportingContent = {
+                        ChatStatusText(
+                            status = statusText,
+                        )
+                    },
+                    trailingContent = {
+                        IconButton(
+                            onClick = {}
+                        ) {
+                            Icon(painterResource(R.drawable.baseline_dots), "menu")
+                        }
+                    }
                 )
             }
 
@@ -195,7 +314,8 @@ fun ChatInfoContent(
                 }
 
                 Card(
-                    Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                    Modifier.fillMaxWidth().padding(vertical = 1.dp)
+                        .padding(horizontal = 16.dp),
                     shape = shape,
                     colors = CardDefaults.cardColors(
                         contentColor = MaterialTheme.colorScheme.surfaceContainer
@@ -229,7 +349,8 @@ fun ChatInfoContent(
                     is TdApi.ChatTypePrivate -> {
                         if (userFullInfo is UserFullInfo && userFullInfo?.bio != null && userFullInfo?.bio?.text != "") {
                             Card(
-                                Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                                Modifier.fillMaxWidth().padding(vertical = 1.dp)
+                                    .padding(horizontal = 16.dp),
                                 shape = shape,
                                 colors = CardDefaults.cardColors(
                                     contentColor = MaterialTheme.colorScheme.surfaceContainer
@@ -256,7 +377,8 @@ fun ChatInfoContent(
                         supergroupFullInfo?.description?.let {
                             if (it != "") {
                                 Card(
-                                    Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                                    Modifier.fillMaxWidth().padding(vertical = 1.dp)
+                                        .padding(horizontal = 16.dp),
                                     shape = shape,
                                     colors = CardDefaults.cardColors(
                                         contentColor = MaterialTheme.colorScheme.surfaceContainer
@@ -284,7 +406,8 @@ fun ChatInfoContent(
                         basicGroupFullInfo?.description?.let {
                             if (it != "") {
                                 Card(
-                                    Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                                    Modifier.fillMaxWidth().padding(vertical = 1.dp)
+                                        .padding(horizontal = 16.dp),
                                     shape = shape,
                                     colors = CardDefaults.cardColors(
                                         contentColor = MaterialTheme.colorScheme.surfaceContainer
@@ -314,8 +437,9 @@ fun ChatInfoContent(
             item {
                 var notificationsEnabled by remember { mutableStateOf(chat.notificationSettings?.muteFor == 0) }
                 Card(
-                    modifier = Modifier.padding(vertical = 8.dp),
-                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.padding(vertical = 8.dp)
+                        .padding(horizontal = 16.dp),
+                    shape = RoundedCornerShape(100.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = if (notificationsEnabled) MaterialTheme.colorScheme.inversePrimary else MaterialTheme.colorScheme.surfaceContainer
                     )
@@ -379,7 +503,8 @@ fun ChatInfoContent(
                             }
                         }
                         Card(
-                            Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                            Modifier.fillMaxWidth().padding(vertical = 1.dp)
+                                .padding(horizontal = 16.dp),
                             shape = shape,
                             colors = CardDefaults.cardColors(
                                 contentColor = MaterialTheme.colorScheme.surfaceContainer
@@ -485,7 +610,8 @@ fun ChatInfoContent(
                                 }
                             }
                             Card(
-                                Modifier.fillMaxWidth().padding(vertical = 1.dp),
+                                Modifier.fillMaxWidth().padding(vertical = 1.dp)
+                                    .padding(horizontal = 16.dp),
                                 shape = shape,
                                 colors = CardDefaults.cardColors(
                                     contentColor = MaterialTheme.colorScheme.surfaceContainer
