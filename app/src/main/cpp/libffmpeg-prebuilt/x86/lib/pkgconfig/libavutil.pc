@@ -1,0 +1,14 @@
+prefix=./build/i686
+exec_prefix=${prefix}
+libdir=./build/i686/lib
+includedir=./build/i686/include
+
+Name: libavutil
+Description: FFmpeg utility library
+Version: 58.29.100
+Requires: 
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavutil -pthread -lm -latomic -landroid
+Libs.private: 
+Cflags: -I${includedir}

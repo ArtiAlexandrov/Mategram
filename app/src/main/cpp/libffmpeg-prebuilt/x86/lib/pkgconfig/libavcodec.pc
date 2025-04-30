@@ -1,0 +1,14 @@
+prefix=./build/i686
+exec_prefix=${prefix}
+libdir=./build/i686/lib
+includedir=./build/i686/include
+
+Name: libavcodec
+Description: FFmpeg codec library
+Version: 60.31.102
+Requires: libavutil >= 58.29.100
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavcodec -lvpx -lm -pthread -pthread -lm -latomic
+Libs.private: 
+Cflags: -I${includedir}
