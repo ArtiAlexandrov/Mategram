@@ -160,15 +160,23 @@ private:
                     int height = frame->height;
                     std::vector<uint8_t> argbBuffer(width * height * 4);
                     int dst_stride = width * 4;
-
-                    // Для прозрачности используем I420AlphaToABGR
-                    int conv_result = libyuv::I420AlphaToABGR(
-                            frame->data[0], frame->linesize[0], // Y
-                            frame->data[1], frame->linesize[1], // U
-                            frame->data[2], frame->linesize[2], // V
-                            frame->data[3], frame->linesize[3], // Alpha
-                            argbBuffer.data(), dst_stride,
-                            width, height, 1);
+                    int conv_result;
+                    if (pix_fmt_name == "yuv420p") {
+                        conv_result = libyuv::I420ToABGR(
+                                frame->data[0], frame->linesize[0], // Y
+                                frame->data[1], frame->linesize[1], // U
+                                frame->data[2], frame->linesize[2], // V
+                                argbBuffer.data(), dst_stride,
+                                width, height);
+                    } else {
+                        conv_result = libyuv::I420AlphaToABGR(
+                                frame->data[0], frame->linesize[0], // Y
+                                frame->data[1], frame->linesize[1], // U
+                                frame->data[2], frame->linesize[2], // V
+                                frame->data[3], frame->linesize[3], // Alpha
+                                argbBuffer.data(), dst_stride,
+                                width, height, 1);
+                    }
 
                     LOGI("Frame DATA3: %p", frame->data[3]);
                     if (conv_result != 0) {

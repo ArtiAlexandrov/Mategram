@@ -684,7 +684,7 @@ fun MessageItem(
         }
         is MessageAnimatedEmoji -> {
             val animatedEmoji = content.animatedEmoji
-            val stickerFile = animatedEmoji.sticker?.sticker
+            val stickerFile by remember { mutableStateOf(animatedEmoji.sticker?.sticker) }
             var stickerPath by remember { mutableStateOf<String?>(null) }
 
             LaunchedEffect(stickerFile) {
@@ -695,7 +695,7 @@ fun MessageItem(
                 }
             }
 
-            LaunchedEffect(downloadedFiles.values) {
+            LaunchedEffect(downloadedFiles[stickerFile?.id]) {
                 val downloadedFile = downloadedFiles[stickerFile?.id]
                 if (downloadedFile?.local?.isDownloadingCompleted == true) {
                     stickerPath = downloadedFile.local?.path
@@ -754,7 +754,7 @@ fun MessageItem(
         }
         is MessageSticker -> {
             val sticker = content.sticker
-            val stickerFile = sticker?.sticker
+            val stickerFile by remember { mutableStateOf(sticker.sticker) }
             var stickerPath by remember { mutableStateOf<String?>(null) }
 
             LaunchedEffect (stickerFile) {
@@ -765,7 +765,7 @@ fun MessageItem(
                 }
             }
 
-            LaunchedEffect(downloadedFiles.values) {
+            LaunchedEffect(downloadedFiles[stickerFile?.id]) {
                 val downloadedFile = downloadedFiles[stickerFile?.id]
                 if (downloadedFile?.local?.isDownloadingCompleted == true) {
                     stickerPath = downloadedFile.local?.path
