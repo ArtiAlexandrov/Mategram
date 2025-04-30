@@ -10,6 +10,7 @@
 #include <string>
 #include <mutex>
 #include <vector>
+#include <cassert>
 
 extern "C" {
 // Заголовки FFmpeg (обязательно включать в extern "C")
@@ -57,6 +58,16 @@ public:
     }
 
 private:
+    // Функция для вычисления временной метки кадра в миллисекундах
+    int64_t getFrameTimestampMs(AVFrame* frame, AVStream* stream) {
+        if (frame->pts != AV_NOPTS_VALUE) {
+            double pts_sec = frame->pts * av_q2d(stream->time_base);
+            return static_cast<int64_t>(pts_sec * 1000);
+        }
+        // Если временная метка отсутствует, возвращаем 0 – можно поставить фиксированный интервал (например, 33 мс)
+        return 0;
+    }
+
     void decodingLoop() {
         AVFormatContext* fmt_ctx = nullptr;
         if (avformat_open_input(&fmt_ctx, mVideoPath.c_str(), nullptr, nullptr) != 0) {
@@ -83,10 +94,17 @@ private:
             return;
         }
 
-        AVCodecParameters* codecpar = fmt_ctx->streams[videoStreamIndex]->codecpar;
+        AVStream* videoStream = fmt_ctx->streams[videoStreamIndex];
+        AVCodecParameters* codecpar = videoStream->codecpar;
         LOGI("Pixel format код: %u", codecpar->format);
 
+        // Явно выбираем декодер libvpx-vp9 по имени
         auto* codec = const_cast<AVCodec *>(avcodec_find_decoder_by_name("libvpx-vp9"));
+        if (!codec) {
+            LOGE("Декодер libvpx-vp9 не найден");
+            avformat_close_input(&fmt_ctx);
+            return;
+        }
 
         // Создание контекста декодера
         AVCodecContext* codec_ctx = avcodec_alloc_context3(codec);
@@ -120,6 +138,9 @@ private:
         AVPacket packet;
         av_init_packet(&packet);
 
+        // Запоминаем стартовое время для синхронизации (для первого кадра)
+        auto startTime = std::chrono::steady_clock::now();
+
         // Основной цикл декодирования с зацикливанием
         while (!mStopDecoding) {
             int ret = av_read_frame(fmt_ctx, &packet);
@@ -127,19 +148,20 @@ private:
                 // Если достигнут конец файла, выполняем переход к началу
                 if (ret == AVERROR_EOF) {
                     LOGI("Достигнут конец файла. Зацикливаем видео...");
-                    // Переводим формат контекста к начальной точке.
                     if (av_seek_frame(fmt_ctx, videoStreamIndex, 0, AVSEEK_FLAG_BACKWARD) < 0) {
                         LOGE("Ошибка зацикливания: не удалось выполнить seek");
                         break;
                     }
-                    // Сбрасываем внутренние буферы декодера, чтобы избежать артефактов
                     avcodec_flush_buffers(codec_ctx);
+                    // Сброс времени: следующий кадр должен показываться с начала
+                    startTime = std::chrono::steady_clock::now();
                     continue;
                 } else {
                     LOGE("Ошибка чтения кадра: %d", ret);
                     break;
                 }
             }
+
             if (packet.stream_index == videoStreamIndex) {
                 if (avcodec_send_packet(codec_ctx, &packet) < 0) {
                     LOGE("Ошибка отправки пакета в декодер");
@@ -160,8 +182,19 @@ private:
                     int height = frame->height;
                     std::vector<uint8_t> argbBuffer(width * height * 4);
                     int dst_stride = width * 4;
-                    int conv_result;
-                    if (pix_fmt_name == "yuv420p") {
+
+                    // Расчёт задержки по PTS
+                    int64_t frameTimestampMs = getFrameTimestampMs(frame, videoStream);
+                    auto expectedTime = startTime + std::chrono::milliseconds(frameTimestampMs);
+                    auto now = std::chrono::steady_clock::now();
+                    if (expectedTime > now) {
+                        std::this_thread::sleep_until(expectedTime);
+                    }
+                    // Если время уже прошло, можно сразу отобразить кадр
+
+                    int conv_result = 0;
+                    // Сравниваем строковое представление формата для определения наличия альфа
+                    if (strcmp(pix_fmt_name, "yuv420p") == 0) {
                         conv_result = libyuv::I420ToABGR(
                                 frame->data[0], frame->linesize[0], // Y
                                 frame->data[1], frame->linesize[1], // U
@@ -184,10 +217,6 @@ private:
                     } else {
                         renderFrame(argbBuffer.data(), width, height);
                     }
-
-                    // Задержка для имитации ~30 fps
-                    std::this_thread::sleep_for(std::chrono::milliseconds(33));
-                    if (mStopDecoding) break;
                 }
             }
             av_packet_unref(&packet);
